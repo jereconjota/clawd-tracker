@@ -9,6 +9,14 @@ probe `api.anthropic.com/v1/messages` once per minute per account with a single
 Haiku token (~$0.0000008) and read the `anthropic-ratelimit-unified-*`
 response headers.
 
+> **Disclaimer** — This is an **unofficial** third-party tool. It is not
+> built, endorsed, or supported by Anthropic. It reuses the same OAuth
+> `client_id` and credentials store that the official Claude Code CLI
+> creates on your machine when you run `claude /login`, so a valid
+> Claude Pro/Max subscription on the active account is required. Use at
+> your own risk; the project is released under the MIT license (see
+> `LICENSE`), with no warranty of fitness for any purpose.
+
 **Menu bar** shows one entry per enabled account, colored by load
 (🟢 < 60 %, 🟡 60–85 %, 🔴 ≥ 85 %). The number is the current **5h** percent:
 
