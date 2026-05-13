@@ -2,3 +2,7 @@ node_modules
 src-tauri/target
 .DS_Store
 dist
+
+# Local-only skill cache (per-user, not part of the project)
+.agents/
+skills-lock.json
