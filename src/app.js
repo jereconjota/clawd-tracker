@@ -94,24 +94,20 @@ export function renderProfile(update, opts = {}) {
     statusLabel = "error";
   }
 
-  const maxPct = Math.max(pct5h, pct7d);
   // Prefer email over profile name as the display label.
   const displayName = update.email || update.profile_name;
 
   div.innerHTML = `
-    <h3>
-      <span>${escapeHtml(displayName)}</span>
-      <span class="pct">${formatPct(maxPct)}</span>
-    </h3>
+    <h3><span>${escapeHtml(displayName)}</span></h3>
     <div class="bar-row">
       <span class="label">5h</span>
       <div class="bar ${colorClass(pct5h)}"><span style="width:${Math.min(100, pct5h * 100)}%"></span></div>
-      <span>${formatPct(pct5h)}</span>
+      <span class="num ${colorClass(pct5h)}">${formatPct(pct5h)}</span>
     </div>
     <div class="bar-row">
       <span class="label">7d</span>
       <div class="bar ${colorClass(pct7d)}"><span style="width:${Math.min(100, pct7d * 100)}%"></span></div>
-      <span>${formatPct(pct7d)}</span>
+      <span class="num ${colorClass(pct7d)}">${formatPct(pct7d)}</span>
     </div>
     ${compact ? "" : `
     <div class="meta">

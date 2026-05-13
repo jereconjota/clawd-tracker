@@ -9,16 +9,30 @@ probe `api.anthropic.com/v1/messages` once per minute per account with a single
 Haiku token (~$0.0000008) and read the `anthropic-ratelimit-unified-*`
 response headers.
 
+**Menu bar** shows one entry per enabled account, colored by load
+(🟢 < 60 %, 🟡 60–85 %, 🔴 ≥ 85 %). The number is the current **5h** percent:
+
 ```
-┌────────────────────────────────────┐
-│  jere                          37% │
-│  5H ████░░░░░░░░░░░░░  37%         │
-│  7D ██░░░░░░░░░░░░░░░  12%         │
-├────────────────────────────────────┤
-│  ravel                          0% │
-│  login required — Open Settings    │
-└────────────────────────────────────┘
+🟡 58% · 🟢 0%
 ```
+
+Click the icon for the popover:
+
+```
+┌──────────────────────────────────────┐
+│  jereconjota                         │
+│  5H ████████░░░░░░░░░░  58%          │
+│  7D ███████████░░░░░░░  66%          │
+│  resets 5h in 2h 34m · 7d in 15h 34m │
+├──────────────────────────────────────┤
+│  Ravel                               │
+│  5H ░░░░░░░░░░░░░░░░░░   0%          │
+│  7D ██░░░░░░░░░░░░░░░░  11%          │
+│  resets 5h in 3h 44m · 7d in 5d  5h  │
+└──────────────────────────────────────┘
+```
+
+The 5H / 7D numbers and bars share the same color scale as the menu-bar dot.
 
 ---
 
@@ -40,7 +54,7 @@ response headers.
 sudo apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1
 
 # 2. download and install the .deb
-curl -LO https://github.com/<your-user>/clawd-tracker/releases/latest/download/clawd-tracker_<version>_amd64.deb
+curl -LO https://github.com/jereconjota/clawd-tracker/releases/latest/download/clawd-tracker_<version>_amd64.deb
 sudo dpkg -i clawd-tracker_<version>_amd64.deb
 
 # 3. launch
@@ -69,31 +83,46 @@ Then open **Clawd Tracker** → tray icon → **Settings**:
   a `.credentials.json`.
 - Or click **+ Add profile** and point the `config_dir` to a fresh path.
 
-### Logging in from inside the app (no CLI required)
+### How credentials work (no app login needed)
 
-The app ships with a built-in OAuth flow:
+Clawd Tracker reads the credentials Claude Code already writes when you run
+`claude /login`. There is no separate login flow inside the app.
 
-1. Settings → pick the profile → **Login**.
-2. The system browser opens at `claude.ai/oauth/authorize`. Approve.
-3. Anthropic's console renders a code (looks like `xxxx#yyyy`).
-4. Copy the **entire** string (code + `#` + state) into the app input → **Submit**.
-5. The button flips to **✓ Logged in** and `~/.claude-<profile>/.credentials.json`
-   is written with `0600` perms.
+- **macOS** — Claude Code stores credentials in your login Keychain, with
+  one entry per `CLAUDE_CONFIG_DIR` (service name
+  `Claude Code-credentials-<sha256(abs_path)[:8]>`). The app reads each
+  profile's slot directly. Multi-account works out of the box.
+- **Ubuntu** — Claude Code writes `<config_dir>/.credentials.json`.
+  Auto-detect picks them up.
 
-If you see **HTTP 429**, wait ~10 minutes — the OAuth endpoint cools down
-after repeated attempts. The app shows a friendly message in this case.
+Token refresh is automatic. On macOS the new token is written back to
+Keychain so the CLI and the app stay in sync.
+
+If a profile says "login required", run the exact command shown in
+Settings → that profile's hint, then click **Refresh** in the popover.
 
 ---
 
 ## Daily use
 
-- **Left-click tray icon** → popover with all enabled accounts.
+- **Left-click tray icon** → popover with all enabled accounts (5h + 7d
+  bars, both colored by load, plus reset countdowns).
 - **Right-click tray icon** → Refresh / Settings / Quit.
 - The widget (toggleable from the popover header) is a draggable, always-on-top
   pill if you want a permanent corner indicator.
 
-The tray title shows the **highest** of (5H, 7D) percentages across all
-profiles, so you see the worst case at a glance.
+### What's in the menu bar
+
+Each enabled profile renders as `<dot> <5h-percent>` joined by ` · `:
+
+| Symbol | Load (`max(5h, 7d)`) |
+|--------|-----------------------|
+| 🟢      | < 60 %               |
+| 🟡      | 60 %–85 %            |
+| 🔴      | ≥ 85 %               |
+
+In Settings each profile has a **show in menu bar** checkbox so you can
+hide noisy accounts while still tracking them in the popover.
 
 ---
 
@@ -145,7 +174,14 @@ Sanity-check that your account actually returns the unified headers (only
 Pro/Max accounts do):
 
 ```bash
+# Ubuntu / Linux (file-based credentials):
 TOKEN=$(jq -r .claudeAiOauth.accessToken ~/.claude-personal/.credentials.json)
+
+# macOS (Keychain-based credentials — replace the path with the absolute one):
+# DIR=/Users/<you>/.claude-personal
+# HASH=$(printf '%s' "$DIR" | shasum -a 256 | cut -c1-8)
+# TOKEN=$(security find-generic-password -s "Claude Code-credentials-$HASH" -w | jq -r .claudeAiOauth.accessToken)
+
 curl -sD - -o /dev/null https://api.anthropic.com/v1/messages \
   -H "Authorization: Bearer $TOKEN" \
   -H "anthropic-version: 2023-06-01" \
@@ -179,16 +215,23 @@ src/                      → frontend (vanilla JS + HTML, no framework)
 src-tauri/
   src/
     lib.rs                  Tauri commands & app bootstrap
-    poller.rs               periodic probe runner
+    poller.rs               periodic probe runner; macOS reads/writes Keychain,
+                            Ubuntu reads/writes file
     probe.rs                api.anthropic.com call + header parsing
-    oauth_login.rs          manual-paste OAuth flow
-    oauth_refresh.rs        token refresh
-    credentials.rs          .credentials.json read/write (0600)
+    oauth_refresh.rs        token refresh (used in background by the poller)
+    credentials.rs          per-profile Keychain access (macOS, sha256-suffixed
+                            service name) + .credentials.json read/write (0600)
     config.rs               app config (~/.config/clawd-tracker/)
-    tray.rs                 menu bar / tray icon
+    tray.rs                 menu-bar icon, semaphore-colored title,
+                            per-profile filtering via show_in_tray
   tauri.conf.json
   Cargo.toml
 ```
+
+The app does **not** ship its own login flow — it reads whatever
+`claude /login` already wrote (Keychain on macOS, file on Linux). Token
+refresh happens transparently in the background and is written back to the
+same store.
 
 ---
 
@@ -196,8 +239,11 @@ src-tauri/
 
 | Symptom                                            | Fix                                                                              |
 |----------------------------------------------------|----------------------------------------------------------------------------------|
-| Login → "HTTP 429"                                 | Wait ~10 min. Anthropic rate-limits the OAuth token endpoint after retries.      |
-| Login → "Invalid request format"                   | Make sure you're on app version ≥ 0.1.0; older versions sent wrong scopes.       |
-| Popover stuck at "login required" after success    | Click **Refresh** in the right-click menu, or wait one poll interval (≤60s).     |
+| Profile shows "login required" (macOS)             | Run `CLAUDE_CONFIG_DIR=<that dir> claude /login` — the app picks it up within 60s. |
+| Profile shows "login required" (Ubuntu)            | Same: `CLAUDE_CONFIG_DIR=<dir> claude /login` writes `.credentials.json`.        |
+| Popover stuck after re-login                       | Click **Refresh** in the right-click menu, or wait one poll interval (≤60s).     |
 | Tray icon missing on Ubuntu/GNOME                  | Install `gnome-shell-extension-appindicator` and re-login.                       |
-| `not Pro/Max` on a clearly Max account             | The OAuth scope grant didn't include `user:inference`. Re-login from Settings.   |
+| `not Pro/Max` on a clearly Max account             | The OAuth scope grant didn't include `user:inference`. Re-run `claude /login`.   |
+| Auto-detect missed a macOS account                 | Make sure you've logged into it via the CLI at least once with the matching `CLAUDE_CONFIG_DIR` — the app keys off the Keychain entry created by that login. |
+| Menu bar shows fewer entries than expected         | Open Settings and check the **show in menu bar** box for the missing profile. |
+| Want a single global indicator instead of per-account dots | Disable **show in menu bar** for every account except one. |

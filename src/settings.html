@@ -41,8 +41,6 @@
 
     <script type="module">
       import { getSnapshot, saveConfig, autoDetect, escapeHtml } from "./app.js";
-      const { invoke } = window.__TAURI__.core;
-      const { listen } = window.__TAURI__.event;
 
       const listEl = document.getElementById("profile-list");
       const intervalEl = document.getElementById("interval");
@@ -69,98 +67,11 @@
         const div = document.createElement("div");
         div.className = "profile-edit";
 
-        const loginBtn = document.createElement("button");
-        loginBtn.style.cssText = "font-size:11px;padding:4px 10px;";
-        loginBtn.textContent = "Login";
-
-        const statusNote = document.createElement("span");
-        statusNote.style.cssText = "font-size:11px;color:var(--fg-dim);margin-left:6px;";
-
-        const pasteRow = document.createElement("div");
-        pasteRow.style.cssText = "display:none;gap:6px;margin-top:6px;width:100%;";
-        const pasteInput = document.createElement("input");
-        pasteInput.type = "text";
-        pasteInput.placeholder = "paste the code from the browser";
-        pasteInput.style.cssText = "flex:1;font-size:11px;padding:4px 6px;";
-        const submitBtn = document.createElement("button");
-        submitBtn.textContent = "Submit";
-        submitBtn.style.cssText = "font-size:11px;padding:4px 10px;";
-        const cancelPasteBtn = document.createElement("button");
-        cancelPasteBtn.className = "ghost";
-        cancelPasteBtn.textContent = "Cancel";
-        cancelPasteBtn.style.cssText = "font-size:11px;padding:4px 10px;";
-        pasteRow.appendChild(pasteInput);
-        pasteRow.appendChild(submitBtn);
-        pasteRow.appendChild(cancelPasteBtn);
-
-        function resetLogin() {
-          loginBtn.disabled = false;
-          loginBtn.textContent = "Login";
-          pasteRow.style.display = "none";
-          pasteInput.value = "";
-        }
-
-        loginBtn.onclick = async () => {
-          if (!profiles[idx].config_dir) {
-            statusNote.textContent = "set a config_dir first";
-            return;
-          }
-          loginBtn.disabled = true;
-          loginBtn.textContent = "Opening browser…";
-          statusNote.textContent = "";
-          try {
-            // Save current edits first so the backend can find the profile
-            await doSave();
-            const url = await invoke("begin_oauth", { profileId: p.id });
-            await window.__TAURI__.shell.open(url);
-            loginBtn.textContent = "Waiting for code…";
-            pasteRow.style.display = "flex";
-            pasteInput.focus();
-          } catch(e) {
-            resetLogin();
-            statusNote.textContent = String(e);
-          }
-        };
-
-        cancelPasteBtn.onclick = () => {
-          resetLogin();
-          statusNote.textContent = "";
-        };
-
-        async function submitCode() {
-          const code = pasteInput.value.trim();
-          if (!code) { pasteInput.focus(); return; }
-          submitBtn.disabled = true;
-          submitBtn.textContent = "Verifying…";
-          statusNote.textContent = "";
-          try {
-            await invoke("submit_oauth_code", { profileId: p.id, code });
-            // Success path is handled by the oauth-login-done listener below.
-          } catch(e) {
-            statusNote.textContent = String(e);
-          } finally {
-            submitBtn.disabled = false;
-            submitBtn.textContent = "Submit";
-          }
-        }
-        submitBtn.onclick = submitCode;
-        pasteInput.addEventListener("keydown", (ev) => {
-          if (ev.key === "Enter") { ev.preventDefault(); submitCode(); }
-        });
-
-        listen("oauth-login-done", (ev) => {
-          if (ev.payload.profile_id !== p.id) return;
-          if (ev.payload.success) {
-            loginBtn.disabled = false;
-            loginBtn.textContent = "✓ Logged in";
-            statusNote.textContent = "";
-            pasteRow.style.display = "none";
-            pasteInput.value = "";
-          } else {
-            resetLogin();
-            statusNote.textContent = ev.payload.error || "login failed";
-          }
-        });
+        const hint = document.createElement("div");
+        hint.style.cssText = "font-size:11px;color:var(--fg-dim);margin-top:6px;line-height:1.4;";
+        hint.innerHTML = `Reads credentials from ${
+          navigator.userAgent.includes("Mac") ? "macOS Keychain" : "<code>.credentials.json</code>"
+        }. If usage is missing, run <code>CLAUDE_CONFIG_DIR=${escapeHtml(p.config_dir || "~/.claude")} claude /login</code> in your terminal.`;
 
         div.innerHTML = `
           <div class="profile-edit-row">
@@ -170,20 +81,19 @@
           </div>
           <div style="display:flex; gap:12px; margin-top:8px; font-size:11px; color: var(--fg-dim); align-items:center;">
             <label><input type="checkbox" data-field="enabled" ${p.enabled ? "checked" : ""}/> enabled</label>
+            <label><input type="checkbox" data-field="show_in_tray" ${p.show_in_tray !== false ? "checked" : ""}/> show in menu bar</label>
             <span data-field="id" style="margin-left:auto;">id: ${escapeHtml(p.id)}</span>
           </div>
         `;
-        const row2 = div.querySelector("div:last-of-type");
-        row2.insertBefore(loginBtn, row2.querySelector("[data-field='id']"));
-        row2.insertBefore(statusNote, row2.querySelector("[data-field='id']"));
-        div.appendChild(pasteRow);
+        div.appendChild(hint);
 
         div.querySelectorAll("[data-field]").forEach((el) => {
           el.addEventListener("input", () => {
             const f = el.dataset.field;
-            if (f === "enabled") {
+            if (f === "id") return;
+            if (el.type === "checkbox") {
               profiles[idx][f] = el.checked;
-            } else if (f !== "id") {
+            } else {
               profiles[idx][f] = el.value;
             }
           });
@@ -224,6 +134,7 @@
           name: "New account",
           config_dir: "~/.claude",
           enabled: true,
+          show_in_tray: true,
           use_macos_keychain: false,
         });
         render();
@@ -231,16 +142,19 @@
 
       document.getElementById("auto-detect").addEventListener("click", async () => {
         const dirs = await autoDetect();
-        const existing = new Set(profiles.map((p) => p.config_dir));
+        // Dedup by basename so `~/.claude-X` and `/Users/u/.claude-X` match.
+        const basename = (p) => (p || "").split("/").filter(Boolean).pop() || "";
+        const existing = new Set(profiles.map((p) => basename(p.config_dir)));
         let added = 0;
         for (const dir of dirs) {
-          if (existing.has(dir)) continue;
-          const tail = dir.split("/").pop() || "claude";
+          const tail = basename(dir);
+          if (!tail || existing.has(tail)) continue;
           profiles.push({
             id: tail,
             name: tail.replace(/^\./, "").replace(/^claude-?/, "") || "default",
             config_dir: dir,
             enabled: true,
+            show_in_tray: true,
             use_macos_keychain: false,
           });
           added++;

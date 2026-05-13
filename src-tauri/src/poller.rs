@@ -117,11 +117,19 @@ async fn poll_one(profile: &Profile, prior: Option<ProfileUpdate>) -> ProfileUpd
 }
 
 async fn load_token(profile: &Profile) -> Result<String> {
-    #[cfg(target_os = "macos")]
-    if profile.use_macos_keychain {
-        return Ok(credentials::read_macos_keychain()?.access_token);
-    }
     let dir = config::resolve_config_dir(profile);
+
+    // macOS: Claude Code stores credentials in Keychain (one entry per
+    // CLAUDE_CONFIG_DIR, keyed by sha256(abs_path)[:8]). Read that directly.
+    #[cfg(target_os = "macos")]
+    {
+        let dir_opt = keychain_dir_for(profile, &dir);
+        if let Ok(creds) = credentials::read_macos_keychain(dir_opt.as_deref()) {
+            return Ok(creds.access_token);
+        }
+        // fall through to file (Ubuntu credentials synced to macOS, manual files, etc.)
+    }
+
     let creds = credentials::read(&dir).map_err(|_| {
         let path = credentials::credentials_path(&dir);
         if !path.exists() {
@@ -134,6 +142,15 @@ async fn load_token(profile: &Profile) -> Result<String> {
         }
     })?;
     Ok(creds.access_token)
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_dir_for(profile: &Profile, resolved: &std::path::Path) -> Option<std::path::PathBuf> {
+    if profile.config_dir.is_empty() {
+        None
+    } else {
+        Some(resolved.to_path_buf())
+    }
 }
 
 async fn run_probe(
@@ -150,15 +167,11 @@ async fn run_probe(
 }
 
 async fn attempt_refresh(profile: &Profile) -> ProfileState {
-    // Keychain profiles can't do file-based refresh; require manual re-login.
-    if profile.use_macos_keychain {
-        return ProfileState::NeedsRelogin {
-            reason: "token expired — run `claude /login` to refresh".to_string(),
-        };
-    }
-
     let dir = config::resolve_config_dir(profile);
-    let current = match credentials::read(&dir) {
+
+    // Read current credentials from wherever they live (Keychain on macOS,
+    // file on Linux — try Keychain first on macOS, fall back to file).
+    let current = match read_credentials(profile, &dir) {
         Ok(c) => c,
         Err(e) => {
             return ProfileState::NeedsRelogin {
@@ -169,7 +182,7 @@ async fn attempt_refresh(profile: &Profile) -> ProfileState {
 
     match oauth_refresh::refresh(&current).await {
         Ok(updated) => {
-            if let Err(e) = credentials::write(&dir, &updated) {
+            if let Err(e) = persist_credentials(profile, &dir, &updated) {
                 return ProfileState::Error {
                     message: format!("refreshed but failed to persist: {e}"),
                 };
@@ -186,6 +199,39 @@ async fn attempt_refresh(profile: &Profile) -> ProfileState {
             reason: e.to_string(),
         },
     }
+}
+
+fn read_credentials(
+    profile: &Profile,
+    dir: &std::path::Path,
+) -> Result<credentials::OauthCredentials> {
+    #[cfg(target_os = "macos")]
+    {
+        let dir_opt = keychain_dir_for(profile, dir);
+        if let Ok(c) = credentials::read_macos_keychain(dir_opt.as_deref()) {
+            return Ok(c);
+        }
+    }
+    let _ = profile; // unused on non-macos
+    credentials::read(dir)
+}
+
+fn persist_credentials(
+    profile: &Profile,
+    dir: &std::path::Path,
+    creds: &credentials::OauthCredentials,
+) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        // If we read from Keychain, write back there. Otherwise (file-based
+        // on macOS — rare, only if user synced from Ubuntu), update the file.
+        let dir_opt = keychain_dir_for(profile, dir);
+        if credentials::read_macos_keychain(dir_opt.as_deref()).is_ok() {
+            return credentials::write_macos_keychain(dir_opt.as_deref(), creds);
+        }
+    }
+    let _ = profile;
+    credentials::write(dir, creds)
 }
 
 fn stale_or_error(prior: Option<&ProfileUpdate>, message: String) -> ProfileState {

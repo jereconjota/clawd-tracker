@@ -64,22 +64,107 @@ pub fn write(config_dir: &Path, creds: &OauthCredentials) -> Result<()> {
     Ok(())
 }
 
+/// Build the Keychain service name for a given config_dir.
+///
+/// Claude Code stores one Keychain entry per `CLAUDE_CONFIG_DIR`:
+/// - `Claude Code-credentials`              for the default `~/.claude`
+/// - `Claude Code-credentials-<hash8>`      for any custom dir, where
+///                                          `hash8 = sha256(abs_path)[:8]`
 #[cfg(target_os = "macos")]
-pub fn read_macos_keychain() -> Result<OauthCredentials> {
+fn keychain_service(config_dir: Option<&Path>) -> String {
+    match config_dir {
+        Some(dir) => {
+            let abs = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+            let hash = sha256_hex_prefix(abs.to_string_lossy().as_bytes(), 8);
+            format!("Claude Code-credentials-{hash}")
+        }
+        None => "Claude Code-credentials".to_string(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn sha256_hex_prefix(bytes: &[u8], n_chars: usize) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    let full = digest.iter().fold(String::new(), |mut acc, b| {
+        acc.push_str(&format!("{b:02x}"));
+        acc
+    });
+    full.chars().take(n_chars).collect()
+}
+
+#[cfg(target_os = "macos")]
+pub fn read_macos_keychain(config_dir: Option<&Path>) -> Result<OauthCredentials> {
     use std::process::Command;
+    let service = keychain_service(config_dir);
     let output = Command::new("security")
-        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .args(["find-generic-password", "-s", &service, "-w"])
         .output()
         .context("invoking `security` to read Keychain")?;
     if !output.status.success() {
-        return Err(anyhow!(
-            "Keychain item 'Claude Code-credentials' not found"
-        ));
+        return Err(anyhow!("Keychain entry '{service}' not found"));
     }
     let raw = String::from_utf8(output.stdout)?.trim().to_string();
     let parsed: CredentialsFile = serde_json::from_str(&raw)
         .context("parsing Keychain payload as Claude credentials JSON")?;
     Ok(parsed.claude_ai_oauth)
+}
+
+#[cfg(target_os = "macos")]
+pub fn write_macos_keychain(config_dir: Option<&Path>, creds: &OauthCredentials) -> Result<()> {
+    use std::process::Command;
+    let service = keychain_service(config_dir);
+    let user = std::env::var("USER").unwrap_or_else(|_| "claude".to_string());
+    let payload = serde_json::to_string(&CredentialsFile {
+        claude_ai_oauth: creds.clone(),
+    })?;
+    let status = Command::new("security")
+        .args([
+            "add-generic-password",
+            "-U", // update if exists
+            "-s",
+            &service,
+            "-a",
+            &user,
+            "-w",
+            &payload,
+        ])
+        .status()
+        .context("invoking `security` to write Keychain")?;
+    if !status.success() {
+        return Err(anyhow!("failed to update Keychain entry '{service}'"));
+    }
+    Ok(())
+}
+
+/// List config directories that have a corresponding Keychain entry on macOS,
+/// regardless of whether `.credentials.json` exists. Returns the directory
+/// paths under `~/.claude*` that have a slot in Keychain.
+#[cfg(target_os = "macos")]
+pub fn auto_detect_keychain_dirs() -> Vec<PathBuf> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return vec![],
+    };
+    let mut found = vec![];
+    let entries = match std::fs::read_dir(&home) {
+        Ok(e) => e,
+        Err(_) => return found,
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with(".claude") {
+            continue;
+        }
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if read_macos_keychain(Some(&path)).is_ok() {
+            found.push(path);
+        }
+    }
+    found
 }
 
 pub fn auto_detect_dirs() -> Vec<PathBuf> {

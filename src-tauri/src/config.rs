@@ -9,6 +9,8 @@ pub struct Profile {
     pub config_dir: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub show_in_tray: bool,
     #[serde(default)]
     pub use_macos_keychain: bool,
 }
@@ -91,43 +93,67 @@ pub fn save(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-fn seed_default() -> Config {
+pub fn seed_default() -> Config {
     let mut cfg = Config::default();
 
-    // File-based profiles (Linux primary path, also macOS if dirs exist).
+    // File-based profiles (Linux primary, also macOS if files exist).
     for dir in crate::credentials::auto_detect_dirs() {
-        let name = dir
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "claude".into());
-        let pretty = name.trim_start_matches('.').replace("claude-", "");
-        let pretty = if pretty.is_empty() { "default".to_string() } else { pretty };
-        cfg.profiles.push(Profile {
-            id: name.clone(),
-            name: pretty,
-            config_dir: dir.to_string_lossy().to_string(),
-            enabled: true,
-            use_macos_keychain: false,
-        });
+        cfg.profiles.push(profile_for_dir(&dir));
     }
 
-    // macOS fallback: if no file-based credentials found, add a Keychain profile.
+    // macOS: also pick up ~/.claude* dirs that have a Keychain entry,
+    // even when .credentials.json doesn't exist (the common case — Claude
+    // Code stores creds in Keychain per-config-dir).
     #[cfg(target_os = "macos")]
-    if cfg.profiles.is_empty() {
-        if crate::credentials::read_macos_keychain().is_ok() {
+    {
+        for dir in crate::credentials::auto_detect_keychain_dirs() {
+            let already = cfg
+                .profiles
+                .iter()
+                .any(|p| crate::credentials::expand(&p.config_dir) == dir);
+            if already {
+                continue;
+            }
+            cfg.profiles.push(profile_for_dir(&dir));
+        }
+
+        // Last resort: default Keychain entry (no CLAUDE_CONFIG_DIR set).
+        if cfg.profiles.is_empty() && crate::credentials::read_macos_keychain(None).is_ok() {
             let email = crate::credentials::find_active_email();
-            let name = email.clone().unwrap_or_else(|| "My Account".to_string());
+            let name = email.unwrap_or_else(|| "My Account".to_string());
             cfg.profiles.push(Profile {
                 id: "keychain".to_string(),
                 name,
                 config_dir: String::new(),
                 enabled: true,
+                show_in_tray: true,
                 use_macos_keychain: true,
             });
         }
     }
 
     cfg
+}
+
+fn profile_for_dir(dir: &std::path::Path) -> Profile {
+    let name = dir
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "claude".into());
+    let pretty = name.trim_start_matches('.').replace("claude-", "");
+    let pretty = if pretty.is_empty() {
+        "default".to_string()
+    } else {
+        pretty
+    };
+    Profile {
+        id: name.clone(),
+        name: pretty,
+        config_dir: dir.to_string_lossy().to_string(),
+        enabled: true,
+        show_in_tray: true,
+        use_macos_keychain: false,
+    }
 }
 
 pub fn resolve_config_dir(profile: &Profile) -> PathBuf {

@@ -5,7 +5,9 @@ use tauri::{
     AppHandle, Manager, WebviewWindow,
 };
 
+use crate::config;
 use crate::poller::{ProfileState, ProfileUpdate};
+use std::collections::HashSet;
 
 pub const TRAY_ID: &str = "main";
 
@@ -41,19 +43,44 @@ pub fn build(app: &AppHandle) -> Result<()> {
 }
 
 pub fn update_tray_title(app: &AppHandle, updates: &[ProfileUpdate]) {
-    let max_pct = updates
+    // Honor per-profile `show_in_tray` toggle. If config can't be read, fall
+    // back to showing all profiles.
+    let visible: Option<HashSet<String>> = config::load().ok().map(|cfg| {
+        cfg.profiles
+            .iter()
+            .filter(|p| p.show_in_tray)
+            .map(|p| p.id.clone())
+            .collect()
+    });
+
+    let parts: Vec<String> = updates
         .iter()
+        .filter(|u| visible.as_ref().map_or(true, |s| s.contains(&u.profile_id)))
         .filter_map(|u| match &u.state {
-            ProfileState::Ok(r) => Some(r.sess_pct.max(r.week_pct)),
-            ProfileState::Stale { last, .. } => Some(last.sess_pct.max(last.week_pct)),
+            ProfileState::Ok(r) => Some((r.sess_pct, r.week_pct)),
+            ProfileState::Stale { last, .. } => Some((last.sess_pct, last.week_pct)),
             _ => None,
         })
-        .fold(0.0_f32, f32::max);
+        .map(|(sess, week)| {
+            // Color reflects the worst of (5h, 7d) so a near-empty 5h with a
+            // hot 7d still signals attention. The displayed number is the 5h
+            // (the most immediate gauge).
+            let worst = sess.max(week);
+            let dot = if worst >= 0.85 {
+                "🔴"
+            } else if worst >= 0.60 {
+                "🟡"
+            } else {
+                "🟢"
+            };
+            format!("{dot} {}%", (sess * 100.0).round() as i32)
+        })
+        .collect();
 
-    let title = if updates.is_empty() {
+    let title = if parts.is_empty() {
         "—".to_string()
     } else {
-        format!("{}%", (max_pct * 100.0).round() as i32)
+        parts.join(" · ")
     };
 
     if let Some(tray) = app.tray_by_id(TRAY_ID) {

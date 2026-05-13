@@ -94,10 +94,13 @@
       .bar-fill.red   { background: var(--red); }
       .bar-pct {
         font-size: 11px;
+        font-weight: 600;
         font-variant-numeric: tabular-nums;
-        color: var(--fg-dim);
+        color: var(--green);
         text-align: right;
       }
+      .bar-pct.amber { color: var(--amber); }
+      .bar-pct.red   { color: var(--red); }
       .profile-meta {
         display: flex;
         justify-content: space-between;
@@ -220,22 +223,20 @@
         }
 
         const name = esc(u.profile_name || u.email || "Account");
-        const maxPct = Math.max(p5, p7);
 
         div.innerHTML = `
           <div class="profile-header">
             <span class="profile-name">${name}</span>
-            <span class="profile-pct">${fmt(maxPct)}</span>
           </div>
           <div class="bar-row">
             <span class="bar-label">5h</span>
             <div class="bar-track"><div class="bar-fill ${pctColor(p5)}" style="width:${Math.min(100, p5*100)}%"></div></div>
-            <span class="bar-pct">${fmt(p5)}</span>
+            <span class="bar-pct ${pctColor(p5)}">${fmt(p5)}</span>
           </div>
           <div class="bar-row">
             <span class="bar-label">7d</span>
             <div class="bar-track"><div class="bar-fill ${pctColor(p7)}" style="width:${Math.min(100, p7*100)}%"></div></div>
-            <span class="bar-pct">${fmt(p7)}</span>
+            <span class="bar-pct ${pctColor(p7)}">${fmt(p7)}</span>
           </div>
           ${status ? `<div class="profile-meta"><span>resets 5h in ${fmtReset(r5)} · 7d in ${fmtReset(r7)}</span><span>${esc(status)}</span></div>` : ""}
         `;

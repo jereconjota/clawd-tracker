@@ -51,7 +51,7 @@ pub async fn refresh(current: &OauthCredentials) -> Result<OauthCredentials> {
         .post(TOKEN_ENDPOINT)
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::ACCEPT, "application/json")
-        .header(header::USER_AGENT, "claude-code/2.1.5")
+        .header("anthropic-beta", "oauth-2025-04-20")
         .json(&req)
         .send()
         .await
