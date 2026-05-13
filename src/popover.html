@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+    <title>Clawd Tracker</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --card-bg: #f8f8fa;
+        --fg: #18181b;
+        --fg-dim: #71717a;
+        --border: rgba(0,0,0,0.08);
+        --green: #16a34a;
+        --amber: #d97706;
+        --red: #dc2626;
+        --accent: #f47c3e;
+        --bar-track: #e4e4e7;
+        --radius: 10px;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        width: 100%; height: 100%;
+        background: transparent;
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+        font-size: 13px;
+        color: var(--fg);
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .shell {
+        padding: 12px 14px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .profile {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 10px 12px;
+      }
+      .profile.error { border-color: var(--red); }
+      .profile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 8px;
+      }
+      .profile-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--fg);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 200px;
+      }
+      .profile-pct {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--accent);
+        font-variant-numeric: tabular-nums;
+      }
+      .bar-row {
+        display: grid;
+        grid-template-columns: 28px 1fr 40px;
+        gap: 7px;
+        align-items: center;
+        margin-bottom: 5px;
+      }
+      .bar-row:last-of-type { margin-bottom: 0; }
+      .bar-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--fg-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .bar-track {
+        height: 7px;
+        background: var(--bar-track);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        background: var(--green);
+        transition: width 0.5s ease;
+      }
+      .bar-fill.amber { background: var(--amber); }
+      .bar-fill.red   { background: var(--red); }
+      .bar-pct {
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        color: var(--fg-dim);
+        text-align: right;
+      }
+      .profile-meta {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        color: var(--fg-dim);
+        margin-top: 7px;
+      }
+      .timestamp {
+        font-size: 10px;
+        color: #a1a1aa;
+        text-align: right;
+      }
+      .footer-bar {
+        display: flex;
+        gap: 6px;
+        border-top: 1px solid var(--border);
+        padding-top: 8px;
+      }
+      .footer-bar button {
+        flex: 1;
+        padding: 5px 0;
+        font-size: 11px;
+        font-weight: 500;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--fg);
+        cursor: pointer;
+      }
+      .footer-bar button:hover { background: var(--card-bg); }
+      .footer-bar button.danger {
+        border-color: var(--red);
+        color: var(--red);
+      }
+      .footer-bar button.danger:hover { background: rgba(220,38,38,0.06); }
+      #profiles { display: flex; flex-direction: column; gap: 8px; }
+      .empty {
+        text-align: center;
+        color: var(--fg-dim);
+        padding: 20px 8px;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div id="profiles"></div>
+      <div id="timestamp" class="timestamp"></div>
+      <div class="footer-bar">
+        <button id="refresh">↻ Refresh</button>
+        <button id="settings">⚙ Settings</button>
+        <button class="danger" id="quit">Quit</button>
+      </div>
+    </div>
+
+    <script type="module">
+      const tauri = window.__TAURI__;
+      const { invoke } = tauri.core;
+      const { listen } = tauri.event;
+
+      const profilesEl = document.getElementById("profiles");
+      const tsEl = document.getElementById("timestamp");
+      const updatesById = new Map();
+
+      function pctColor(p) {
+        if (p >= 0.85) return "red";
+        if (p >= 0.6)  return "amber";
+        return "";
+      }
+
+      function fmt(p) { return Math.round((p || 0) * 100) + "%"; }
+
+      function fmtReset(iso) {
+        if (!iso) return "—";
+        const mins = Math.max(0, Math.floor((new Date(iso) - Date.now()) / 60000));
+        if (mins < 60)  return mins + "m";
+        const h = Math.floor(mins / 60), m = mins % 60;
+        if (h < 24) return h + "h " + m + "m";
+        return Math.floor(h / 24) + "d " + (h % 24) + "h";
+      }
+
+      function esc(s) {
+        return String(s || "")
+          .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+          .replace(/"/g,"&quot;");
+      }
+
+      async function fitHeight() {
+        // Let the browser lay out the new content before measuring.
+        await new Promise(r => requestAnimationFrame(r));
+        const h = document.body.scrollHeight;
+        await invoke("fit_window_height", { label: "popover", height: h }).catch(() => {});
+      }
+
+      function renderAll() {
+        if (updatesById.size === 0) {
+          profilesEl.innerHTML = `<div class="empty">No accounts configured.<br/><button onclick="invoke('show_settings')" style="margin-top:8px;border:1px solid #e4e4e7;border-radius:6px;padding:4px 12px;background:transparent;cursor:pointer">Open Settings</button></div>`;
+          fitHeight();
+          return;
+        }
+        profilesEl.innerHTML = "";
+        for (const u of updatesById.values()) {
+          profilesEl.appendChild(renderProfile(u));
+        }
+        const latest = Math.max(...[...updatesById.values()].map(u => new Date(u.updated_at).getTime()));
+        tsEl.textContent = "Updated " + new Date(latest).toLocaleTimeString();
+        fitHeight();
+      }
+
+      function renderProfile(u) {
+        const div = document.createElement("div");
+        div.className = "profile" + (["needs_relogin","error","not_pro_max"].includes(u.state.kind) ? " error" : "");
+
+        const s = u.state;
+        let p5 = 0, p7 = 0, r5 = null, r7 = null, status = "";
+        if (s.kind === "ok") {
+          p5 = s.sess_pct; p7 = s.week_pct; r5 = s.sess_reset; r7 = s.week_reset; status = s.status;
+        } else if (s.kind === "stale") {
+          p5 = s.last.sess_pct; p7 = s.last.week_pct; r5 = s.last.sess_reset; r7 = s.last.week_reset; status = "stale";
+        }
+
+        const name = esc(u.profile_name || u.email || "Account");
+        const maxPct = Math.max(p5, p7);
+
+        div.innerHTML = `
+          <div class="profile-header">
+            <span class="profile-name">${name}</span>
+            <span class="profile-pct">${fmt(maxPct)}</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">5h</span>
+            <div class="bar-track"><div class="bar-fill ${pctColor(p5)}" style="width:${Math.min(100, p5*100)}%"></div></div>
+            <span class="bar-pct">${fmt(p5)}</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">7d</span>
+            <div class="bar-track"><div class="bar-fill ${pctColor(p7)}" style="width:${Math.min(100, p7*100)}%"></div></div>
+            <span class="bar-pct">${fmt(p7)}</span>
+          </div>
+          ${status ? `<div class="profile-meta"><span>resets 5h in ${fmtReset(r5)} · 7d in ${fmtReset(r7)}</span><span>${esc(status)}</span></div>` : ""}
+        `;
+
+        if (s.kind === "needs_relogin") {
+          const note = document.createElement("div");
+          note.className = "profile-meta";
+          note.textContent = "login required — use Settings → Login";
+          div.appendChild(note);
+        }
+        return div;
+      }
+
+      async function init() {
+        try {
+          const snap = await invoke("get_snapshot");
+          for (const u of (snap?.updates ?? [])) updatesById.set(u.profile_id, u);
+        } catch(e) { console.error(e); }
+        renderAll();
+        listen("usage-updated", ev => {
+          updatesById.set(ev.payload.profile_id, ev.payload);
+          renderAll();
+        });
+        listen("config-changed", ev => {
+          const active = new Set(ev.payload);
+          for (const id of updatesById.keys()) {
+            if (!active.has(id)) updatesById.delete(id);
+          }
+          renderAll();
+        });
+      }
+
+      document.getElementById("refresh").addEventListener("click", () => invoke("refresh_now"));
+      document.getElementById("settings").addEventListener("click", () => invoke("show_settings"));
+      document.getElementById("quit").addEventListener("click", () => invoke("quit_app"));
+
+      // No auto-close on blur: closing via tray icon click (toggle) is enough.
+      // (Auto-close caused Settings window to kill the popover when it got focus.)
+
+      init();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,135 @@
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    pub id: String,
+    pub name: String,
+    pub config_dir: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub use_macos_keychain: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowPos {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    #[serde(default)]
+    pub profiles: Vec<Profile>,
+    #[serde(default = "default_interval")]
+    pub poll_interval_s: u64,
+    #[serde(default)]
+    pub widget_visible: bool,
+    #[serde(default)]
+    pub widget_pos: Option<WindowPos>,
+    #[serde(default = "default_true")]
+    pub autostart: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_interval() -> u64 {
+    60
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            profiles: vec![],
+            poll_interval_s: default_interval(),
+            widget_visible: false,
+            widget_pos: None,
+            autostart: true,
+        }
+    }
+}
+
+pub fn config_dir() -> Result<PathBuf> {
+    let base = dirs::config_dir()
+        .ok_or_else(|| anyhow::anyhow!("no config dir found for this OS"))?;
+    let dir = base.join("clawd-tracker");
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("creating {}", dir.display()))?;
+    }
+    Ok(dir)
+}
+
+pub fn config_path() -> Result<PathBuf> {
+    Ok(config_dir()?.join("config.json"))
+}
+
+pub fn load() -> Result<Config> {
+    let path = config_path()?;
+    if !path.exists() {
+        return Ok(seed_default());
+    }
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("reading {}", path.display()))?;
+    let cfg: Config = serde_json::from_str(&raw)
+        .with_context(|| format!("parsing {}", path.display()))?;
+    Ok(cfg)
+}
+
+pub fn save(cfg: &Config) -> Result<()> {
+    let path = config_path()?;
+    let serialized = serde_json::to_string_pretty(cfg)?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serialized)
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("renaming {} -> {}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
+fn seed_default() -> Config {
+    let mut cfg = Config::default();
+
+    // File-based profiles (Linux primary path, also macOS if dirs exist).
+    for dir in crate::credentials::auto_detect_dirs() {
+        let name = dir
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "claude".into());
+        let pretty = name.trim_start_matches('.').replace("claude-", "");
+        let pretty = if pretty.is_empty() { "default".to_string() } else { pretty };
+        cfg.profiles.push(Profile {
+            id: name.clone(),
+            name: pretty,
+            config_dir: dir.to_string_lossy().to_string(),
+            enabled: true,
+            use_macos_keychain: false,
+        });
+    }
+
+    // macOS fallback: if no file-based credentials found, add a Keychain profile.
+    #[cfg(target_os = "macos")]
+    if cfg.profiles.is_empty() {
+        if crate::credentials::read_macos_keychain().is_ok() {
+            let email = crate::credentials::find_active_email();
+            let name = email.clone().unwrap_or_else(|| "My Account".to_string());
+            cfg.profiles.push(Profile {
+                id: "keychain".to_string(),
+                name,
+                config_dir: String::new(),
+                enabled: true,
+                use_macos_keychain: true,
+            });
+        }
+    }
+
+    cfg
+}
+
+pub fn resolve_config_dir(profile: &Profile) -> PathBuf {
+    crate::credentials::expand(&profile.config_dir)
+}

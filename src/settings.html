@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+    <title>Clawd Tracker — Settings</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="settings">
+    <div class="shell">
+      <div class="header">
+        <span>Settings</span>
+      </div>
+
+      <div class="section-title">Profiles</div>
+      <div id="profile-list"></div>
+      <div style="display:flex; gap:8px;">
+        <button class="ghost" id="add">+ Add profile</button>
+        <button class="ghost" id="auto-detect">Auto-detect</button>
+      </div>
+
+      <div class="section-title">Polling</div>
+      <div class="form-row">
+        <label for="interval">Interval (s)</label>
+        <input type="number" id="interval" min="10" step="5" />
+      </div>
+
+      <div class="section-title">Startup</div>
+      <div class="form-row">
+        <label for="autostart">Launch at login</label>
+        <input type="checkbox" id="autostart" />
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top: 16px;">
+        <button id="save">Save</button>
+        <button class="ghost" id="cancel">Close</button>
+      </div>
+
+      <div id="status" class="footer" style="margin-top:8px;"></div>
+    </div>
+
+    <script type="module">
+      import { getSnapshot, saveConfig, autoDetect, escapeHtml } from "./app.js";
+      const { invoke } = window.__TAURI__.core;
+      const { listen } = window.__TAURI__.event;
+
+      const listEl = document.getElementById("profile-list");
+      const intervalEl = document.getElementById("interval");
+      const autostartEl = document.getElementById("autostart");
+      const statusEl = document.getElementById("status");
+
+      let profiles = [];
+      let pollInterval = 60;
+      let autostart = true;
+      let widgetVisible = false;
+      let widgetPos = null;
+
+      async function doSave() {
+        await saveConfig({
+          profiles,
+          poll_interval_s: Math.max(10, parseInt(intervalEl.value || "60", 10)),
+          widget_visible: widgetVisible,
+          widget_pos: widgetPos,
+          autostart: autostartEl.checked,
+        });
+      }
+
+      function rowTemplate(p, idx) {
+        const div = document.createElement("div");
+        div.className = "profile-edit";
+
+        const loginBtn = document.createElement("button");
+        loginBtn.style.cssText = "font-size:11px;padding:4px 10px;";
+        loginBtn.textContent = "Login";
+
+        const statusNote = document.createElement("span");
+        statusNote.style.cssText = "font-size:11px;color:var(--fg-dim);margin-left:6px;";
+
+        const pasteRow = document.createElement("div");
+        pasteRow.style.cssText = "display:none;gap:6px;margin-top:6px;width:100%;";
+        const pasteInput = document.createElement("input");
+        pasteInput.type = "text";
+        pasteInput.placeholder = "paste the code from the browser";
+        pasteInput.style.cssText = "flex:1;font-size:11px;padding:4px 6px;";
+        const submitBtn = document.createElement("button");
+        submitBtn.textContent = "Submit";
+        submitBtn.style.cssText = "font-size:11px;padding:4px 10px;";
+        const cancelPasteBtn = document.createElement("button");
+        cancelPasteBtn.className = "ghost";
+        cancelPasteBtn.textContent = "Cancel";
+        cancelPasteBtn.style.cssText = "font-size:11px;padding:4px 10px;";
+        pasteRow.appendChild(pasteInput);
+        pasteRow.appendChild(submitBtn);
+        pasteRow.appendChild(cancelPasteBtn);
+
+        function resetLogin() {
+          loginBtn.disabled = false;
+          loginBtn.textContent = "Login";
+          pasteRow.style.display = "none";
+          pasteInput.value = "";
+        }
+
+        loginBtn.onclick = async () => {
+          if (!profiles[idx].config_dir) {
+            statusNote.textContent = "set a config_dir first";
+            return;
+          }
+          loginBtn.disabled = true;
+          loginBtn.textContent = "Opening browser…";
+          statusNote.textContent = "";
+          try {
+            // Save current edits first so the backend can find the profile
+            await doSave();
+            const url = await invoke("begin_oauth", { profileId: p.id });
+            await window.__TAURI__.shell.open(url);
+            loginBtn.textContent = "Waiting for code…";
+            pasteRow.style.display = "flex";
+            pasteInput.focus();
+          } catch(e) {
+            resetLogin();
+            statusNote.textContent = String(e);
+          }
+        };
+
+        cancelPasteBtn.onclick = () => {
+          resetLogin();
+          statusNote.textContent = "";
+        };
+
+        async function submitCode() {
+          const code = pasteInput.value.trim();
+          if (!code) { pasteInput.focus(); return; }
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Verifying…";
+          statusNote.textContent = "";
+          try {
+            await invoke("submit_oauth_code", { profileId: p.id, code });
+            // Success path is handled by the oauth-login-done listener below.
+          } catch(e) {
+            statusNote.textContent = String(e);
+          } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Submit";
+          }
+        }
+        submitBtn.onclick = submitCode;
+        pasteInput.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") { ev.preventDefault(); submitCode(); }
+        });
+
+        listen("oauth-login-done", (ev) => {
+          if (ev.payload.profile_id !== p.id) return;
+          if (ev.payload.success) {
+            loginBtn.disabled = false;
+            loginBtn.textContent = "✓ Logged in";
+            statusNote.textContent = "";
+            pasteRow.style.display = "none";
+            pasteInput.value = "";
+          } else {
+            resetLogin();
+            statusNote.textContent = ev.payload.error || "login failed";
+          }
+        });
+
+        div.innerHTML = `
+          <div class="profile-edit-row">
+            <input type="text" data-field="name" placeholder="Display name" value="${escapeHtml(p.name)}" />
+            <input type="text" data-field="config_dir" placeholder="~/.claude-personal" value="${escapeHtml(p.config_dir)}" />
+            <button class="ghost" data-action="remove">×</button>
+          </div>
+          <div style="display:flex; gap:12px; margin-top:8px; font-size:11px; color: var(--fg-dim); align-items:center;">
+            <label><input type="checkbox" data-field="enabled" ${p.enabled ? "checked" : ""}/> enabled</label>
+            <span data-field="id" style="margin-left:auto;">id: ${escapeHtml(p.id)}</span>
+          </div>
+        `;
+        const row2 = div.querySelector("div:last-of-type");
+        row2.insertBefore(loginBtn, row2.querySelector("[data-field='id']"));
+        row2.insertBefore(statusNote, row2.querySelector("[data-field='id']"));
+        div.appendChild(pasteRow);
+
+        div.querySelectorAll("[data-field]").forEach((el) => {
+          el.addEventListener("input", () => {
+            const f = el.dataset.field;
+            if (f === "enabled") {
+              profiles[idx][f] = el.checked;
+            } else if (f !== "id") {
+              profiles[idx][f] = el.value;
+            }
+          });
+        });
+        div.querySelector('[data-action="remove"]').addEventListener("click", () => {
+          profiles.splice(idx, 1);
+          render();
+        });
+        return div;
+      }
+
+      function render() {
+        listEl.innerHTML = "";
+        profiles.forEach((p, i) => listEl.appendChild(rowTemplate(p, i)));
+      }
+
+      async function init() {
+        const snap = await getSnapshot();
+        if (snap?.config) {
+          profiles = snap.config.profiles || [];
+          pollInterval = snap.config.poll_interval_s || 60;
+          autostart = snap.config.autostart ?? true;
+          widgetVisible = snap.config.widget_visible ?? false;
+          widgetPos = snap.config.widget_pos ?? null;
+        }
+        intervalEl.value = pollInterval;
+        autostartEl.checked = autostart;
+        render();
+      }
+
+      function newId() {
+        return "p" + Math.random().toString(36).slice(2, 8);
+      }
+
+      document.getElementById("add").addEventListener("click", () => {
+        profiles.push({
+          id: newId(),
+          name: "New account",
+          config_dir: "~/.claude",
+          enabled: true,
+          use_macos_keychain: false,
+        });
+        render();
+      });
+
+      document.getElementById("auto-detect").addEventListener("click", async () => {
+        const dirs = await autoDetect();
+        const existing = new Set(profiles.map((p) => p.config_dir));
+        let added = 0;
+        for (const dir of dirs) {
+          if (existing.has(dir)) continue;
+          const tail = dir.split("/").pop() || "claude";
+          profiles.push({
+            id: tail,
+            name: tail.replace(/^\./, "").replace(/^claude-?/, "") || "default",
+            config_dir: dir,
+            enabled: true,
+            use_macos_keychain: false,
+          });
+          added++;
+        }
+        render();
+        statusEl.textContent = added ? `Found ${added} new profile(s).` : "No new profiles found.";
+      });
+
+      document.getElementById("save").addEventListener("click", async () => {
+        try {
+          await doSave();
+          statusEl.textContent = "Saved.";
+          setTimeout(() => (statusEl.textContent = ""), 1800);
+        } catch (e) {
+          statusEl.textContent = "Save failed: " + e;
+        }
+      });
+
+      async function saveAndHide() {
+        try { await doSave(); } catch(e) { /* best-effort */ }
+        window.__TAURI__.window.getCurrentWindow().hide();
+      }
+
+      document.getElementById("cancel").addEventListener("click", saveAndHide);
+
+      // Intercept the OS ✕ button: hide instead of destroy so the window can reopen.
+      window.__TAURI__.window.getCurrentWindow().onCloseRequested(async (event) => {
+        event.preventDefault();
+        await saveAndHide();
+      });
+
+      init();
+    </script>
+  </body>
+</html>

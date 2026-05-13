@@ -1,0 +1,71 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Clawd Tracker",
+  "version": "0.1.0",
+  "identifier": "dev.jereconjota.clawd-tracker",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "popover",
+        "title": "Clawd Tracker",
+        "width": 320,
+        "height": 200,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "url": "popover.html"
+      },
+      {
+        "label": "widget",
+        "title": "Clawd Widget",
+        "width": 280,
+        "height": 180,
+        "resizable": false,
+        "decorations": false,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "url": "widget.html"
+      },
+      {
+        "label": "settings",
+        "title": "Clawd Tracker — Settings",
+        "width": 520,
+        "height": 580,
+        "minHeight": 400,
+        "resizable": true,
+        "decorations": true,
+        "visible": false,
+        "url": "settings.html"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "deb", "appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "category": "DeveloperTool",
+    "shortDescription": "Claude Pro/Max multi-account usage tracker",
+    "longDescription": "Tray + floating widget that shows the 5h session and weekly utilization for each of your Claude Pro/Max accounts."
+  }
+}
