@@ -6,3 +6,6 @@ dist
 # Local-only skill cache (per-user, not part of the project)
 .agents/
 skills-lock.json
+
+# Project uses pnpm; ignore stray npm artifacts
+package-lock.json

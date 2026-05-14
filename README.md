@@ -163,14 +163,28 @@ Artifacts land in `src-tauri/target/release/bundle/`:
 
 ### Cut a GitHub release (binaries only, no commit bloat)
 
+`pnpm tauri build` only produces artifacts for the OS it runs on, so a
+multi-platform release is a two-step ritual:
+
 ```bash
-VERSION=0.1.0
+# Step 1 — on macOS, create the release with the .dmg
+VERSION=0.1.1
+pnpm tauri build
 gh release create v$VERSION \
   --title "v$VERSION" \
-  --notes "Release notes here" \
-  src-tauri/target/release/bundle/dmg/*.dmg \
-  src-tauri/target/release/bundle/deb/*.deb
+  --notes-file release-notes.md \
+  "src-tauri/target/release/bundle/dmg/Clawd Tracker_${VERSION}_aarch64.dmg"
+
+# Step 2 — on Ubuntu, build the .deb and upload to the same release
+git pull
+pnpm install
+pnpm tauri build
+gh release upload v$VERSION \
+  src-tauri/target/release/bundle/deb/clawd-tracker_${VERSION}_amd64.deb
 ```
+
+The same release tag now hosts both binaries; `..../releases/latest/download/...`
+URLs in the README install commands resolve to whichever OS asset matches.
 
 Binaries live in **GitHub Releases**, not in the git history.
 
