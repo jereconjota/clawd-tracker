@@ -29,7 +29,8 @@ J 58% · Per 0%
 When every profile has **show in menu bar** off, the tray title is empty
 and only the icon is visible.
 
-Click the icon for the popover:
+Click the icon (macOS) or pick **Show details** from the menu (Linux) to
+open the popover:
 
 ```
 ┌──────────────────────────────────────┐
@@ -53,12 +54,14 @@ The 5H / 7D numbers and bars are colored by load (green < 60 %, amber 60–85 %,
 
 ### macOS
 
-1. Download `Clawd.Tracker_<version>_aarch64.dmg` (Apple Silicon) or
-   `..._x64.dmg` (Intel) from the [Releases page](../../releases/latest).
+1. Download `Clawd.Tracker_<version>_aarch64.dmg` (Apple Silicon — arm64)
+   from the [Releases page](../../releases/latest). Intel Macs aren't
+   prebuilt; see [Build from source](#build-from-source).
 2. Open the `.dmg`, drag **Clawd Tracker** to `/Applications`.
 3. First launch may be blocked by Gatekeeper (unsigned). Right-click the app
    → **Open** → confirm. After that, launch normally.
-4. The icon appears in the menu bar with a `%` indicator.
+4. The lightning-bolt icon appears in the menu bar followed by
+   `<label> <5h%>` per enabled account.
 
 ### Ubuntu / Debian
 
@@ -131,16 +134,26 @@ Settings → that profile's hint, then click **Refresh** in the popover.
 
 ### What's in the menu bar
 
-Each enabled profile renders as `<dot> <5h-percent>` joined by ` · `:
+Each enabled profile renders as `<label> <5h-percent>` joined by ` · `, e.g.
 
-| Symbol | Load (`max(5h, 7d)`) |
-|--------|-----------------------|
-| 🟢      | < 60 %               |
-| 🟡      | 60 %–85 %            |
-| 🔴      | ≥ 85 %               |
+```
+J 58% · Per 0%
+```
 
-In Settings each profile has a **show in menu bar** checkbox so you can
-hide noisy accounts while still tracking them in the popover.
+The label is either:
+
+- The profile's **Menubar label** override from Settings (used verbatim,
+  up to 12 chars, no truncation), or
+- The profile's name truncated to 5 characters with `…` when no override
+  is set.
+
+Each profile also has a **show in menu bar** checkbox in Settings — uncheck
+it to hide an account from the menu bar while still tracking it in the
+popover. When every profile is hidden, the tray title is empty and only
+the icon shows.
+
+Colors live in the **popover**, not the menu bar: the 5H / 7D bars and
+their percentages turn green / amber / red as load crosses 60 % and 85 %.
 
 ---
 
@@ -253,8 +266,8 @@ src-tauri/
     credentials.rs          per-profile Keychain access (macOS, sha256-suffixed
                             service name) + .credentials.json read/write (0600)
     config.rs               app config (~/.config/clawd-tracker/)
-    tray.rs                 menu-bar icon, "<name> <5h%>" title,
-                            per-profile filtering via show_in_tray
+    tray.rs                 menu-bar icon, "<label> <5h%>" title with
+                            per-profile filtering and custom-label override
   tauri.conf.json
   Cargo.toml
 ```
@@ -263,6 +276,10 @@ The app does **not** ship its own login flow — it reads whatever
 `claude /login` already wrote (Keychain on macOS, file on Linux). Token
 refresh happens transparently in the background and is written back to the
 same store.
+
+If you're new to Rust or Tauri, [`RUST_PRIMER.md`](RUST_PRIMER.md) walks
+through the stack, the crates used, and the Rust patterns you'll see most
+often in this codebase.
 
 ---
 
@@ -277,4 +294,4 @@ same store.
 | `not Pro/Max` on a clearly Max account             | The OAuth scope grant didn't include `user:inference`. Re-run `claude /login`.   |
 | Auto-detect missed a macOS account                 | Make sure you've logged into it via the CLI at least once with the matching `CLAUDE_CONFIG_DIR` — the app keys off the Keychain entry created by that login. |
 | Menu bar shows fewer entries than expected         | Open Settings and check the **show in menu bar** box for the missing profile. |
-| Menu bar string is too long with many accounts     | Use shorter names (≤10 chars), or uncheck **show in menu bar** for the accounts you don't need at a glance. |
+| Menu bar string is too long with many accounts     | Set a short **Menubar label** per profile in Settings (e.g. `J` for `jereconjota`), or uncheck **show in menu bar** for accounts you don't need at a glance. |
