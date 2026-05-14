@@ -29,6 +29,16 @@
         user-select: none;
         -webkit-user-select: none;
       }
+      /* Linux compositors don't paint window shadows / blur the same way
+         macOS does, so the transparent window looks unanchored. Fill it
+         with the card background instead — the Linux build still uses the
+         transparent window flag (set in tauri.conf.json) but body opacity
+         makes it visually solid. */
+      body.linux {
+        background: var(--bg);
+        border-radius: var(--radius);
+        box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+      }
       .shell {
         padding: 12px 14px 10px;
         display: flex;
@@ -113,6 +123,30 @@
         color: #a1a1aa;
         text-align: right;
       }
+      .top-bar {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: -4px;
+      }
+      .pin-btn {
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 11px;
+        color: var(--fg-dim);
+        cursor: pointer;
+        padding: 3px 8px;
+        line-height: 1;
+        transition: all 0.15s ease;
+      }
+      .pin-btn:hover { background: var(--card-bg); color: var(--fg); }
+      .pin-btn.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
       .footer-bar {
         display: flex;
         gap: 6px;
@@ -147,6 +181,9 @@
   </head>
   <body>
     <div class="shell">
+      <div class="top-bar">
+        <button id="pin" class="pin-btn" title="Toggle floating widget">📌 Pin</button>
+      </div>
       <div id="profiles"></div>
       <div id="timestamp" class="timestamp"></div>
       <div class="footer-bar">
@@ -249,6 +286,23 @@
       document.getElementById("refresh").addEventListener("click", () => invoke("refresh_now"));
       document.getElementById("settings").addEventListener("click", () => invoke("show_settings"));
       document.getElementById("quit").addEventListener("click", () => invoke("quit_app"));
+
+      const pinBtn = document.getElementById("pin");
+      async function refreshPinState() {
+        try {
+          const snap = await invoke("get_snapshot");
+          if (snap?.config?.widget_visible) pinBtn.classList.add("active");
+          else pinBtn.classList.remove("active");
+        } catch {}
+      }
+      pinBtn.addEventListener("click", async () => {
+        await invoke("toggle_widget");
+        await refreshPinState();
+      });
+      refreshPinState();
+
+      // Platform-specific body class — opaque background on Linux.
+      if (navigator.userAgent.includes("Linux")) document.body.classList.add("linux");
 
       init();
     </script>

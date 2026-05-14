@@ -28,12 +28,12 @@ Click the icon for the popover:
 
 ```
 ┌──────────────────────────────────────┐
-│  jereconjota                         │
+│  account-1                           │
 │  5H ████████░░░░░░░░░░  58%          │
 │  7D ███████████░░░░░░░  66%          │
 │  resets 5h in 2h 34m · 7d in 15h 34m │
 ├──────────────────────────────────────┤
-│  Ravel                               │
+│  account-2                           │
 │  5H ░░░░░░░░░░░░░░░░░░   0%          │
 │  7D ██░░░░░░░░░░░░░░░░  11%          │
 │  resets 5h in 3h 44m · 7d in 5d  5h  │
@@ -175,7 +175,7 @@ multi-platform release is a two-step ritual:
 
 ```bash
 # Step 1 — on macOS, create the release with the .dmg
-VERSION=0.1.2
+VERSION=0.1.3
 pnpm tauri build
 gh release create v$VERSION \
   --title "v$VERSION" \
