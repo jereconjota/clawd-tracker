@@ -96,14 +96,10 @@ pub fn save(cfg: &Config) -> Result<()> {
 pub fn seed_default() -> Config {
     let mut cfg = Config::default();
 
-    // File-based profiles (Linux primary, also macOS if files exist).
     for dir in crate::credentials::auto_detect_dirs() {
         cfg.profiles.push(profile_for_dir(&dir));
     }
 
-    // macOS: also pick up ~/.claude* dirs that have a Keychain entry,
-    // even when .credentials.json doesn't exist (the common case — Claude
-    // Code stores creds in Keychain per-config-dir).
     #[cfg(target_os = "macos")]
     {
         for dir in crate::credentials::auto_detect_keychain_dirs() {
@@ -117,7 +113,8 @@ pub fn seed_default() -> Config {
             cfg.profiles.push(profile_for_dir(&dir));
         }
 
-        // Last resort: default Keychain entry (no CLAUDE_CONFIG_DIR set).
+        // Default Keychain entry only if nothing else turned up; falls back to
+        // the slot Claude Code uses when CLAUDE_CONFIG_DIR is unset.
         if cfg.profiles.is_empty() && crate::credentials::read_macos_keychain(None).is_ok() {
             let email = crate::credentials::find_active_email();
             let name = email.unwrap_or_else(|| "My Account".to_string());

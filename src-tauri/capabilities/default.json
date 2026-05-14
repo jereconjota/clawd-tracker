@@ -17,8 +17,6 @@
     "core:app:default",
     "core:tray:default",
     "core:menu:default",
-    "autostart:default",
-    "dialog:default",
-    "shell:default"
+    "autostart:default"
   ]
 }

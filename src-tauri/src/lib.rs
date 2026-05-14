@@ -98,8 +98,6 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             refresh_now,

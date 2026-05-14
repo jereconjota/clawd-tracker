@@ -63,6 +63,13 @@ pub async fn tick(app: &AppHandle, store: &UsageStoreHandle) {
         }
     };
 
+    let visible_ids: std::collections::HashSet<String> = cfg
+        .profiles
+        .iter()
+        .filter(|p| p.show_in_tray)
+        .map(|p| p.id.clone())
+        .collect();
+
     let mut latest: Vec<ProfileUpdate> = vec![];
     for profile in cfg.profiles.iter().filter(|p| p.enabled) {
         let prior = store
@@ -80,25 +87,17 @@ pub async fn tick(app: &AppHandle, store: &UsageStoreHandle) {
     }
 
     *store.updates.lock().await = latest.clone();
-    crate::tray::update_tray_title(app, &latest);
+    crate::tray::update_tray_title(app, &latest, &visible_ids);
 }
 
 async fn poll_one(profile: &Profile, prior: Option<ProfileUpdate>) -> ProfileUpdate {
     let now = Utc::now();
     let prior_email = prior.as_ref().and_then(|p| p.email.clone());
+    let resolved_email = resolve_email(profile).or(prior_email);
 
-    // Resolve email from .claude.json (more reliable than JWT decode for opaque tokens).
-    let resolved_email = if profile.use_macos_keychain {
-        credentials::find_active_email()
-    } else {
-        let dir = config::resolve_config_dir(profile);
-        credentials::email_from_claude_json(&dir)
-    }
-    .or(prior_email.clone());
-
-    let (state, email) = match load_token(profile).await {
-        Ok(token) => {
-            let state = run_probe(profile, token, prior.as_ref()).await;
+    let (state, email) = match load_credentials(profile) {
+        Ok((creds, source)) => {
+            let state = probe_with(creds, source, prior.as_ref()).await;
             (state, resolved_email)
         }
         Err(e) => (
@@ -116,18 +115,36 @@ async fn poll_one(profile: &Profile, prior: Option<ProfileUpdate>) -> ProfileUpd
     }
 }
 
-async fn load_token(profile: &Profile) -> Result<String> {
+fn resolve_email(profile: &Profile) -> Option<String> {
+    if profile.config_dir.is_empty() {
+        credentials::find_active_email()
+    } else {
+        credentials::email_from_claude_json(&config::resolve_config_dir(profile))
+    }
+}
+
+#[derive(Debug, Clone)]
+enum CredSource {
+    #[cfg(target_os = "macos")]
+    Keychain(Option<std::path::PathBuf>),
+    File(std::path::PathBuf),
+}
+
+fn load_credentials(
+    profile: &Profile,
+) -> Result<(credentials::OauthCredentials, CredSource)> {
     let dir = config::resolve_config_dir(profile);
 
-    // macOS: Claude Code stores credentials in Keychain (one entry per
-    // CLAUDE_CONFIG_DIR, keyed by sha256(abs_path)[:8]). Read that directly.
     #[cfg(target_os = "macos")]
     {
-        let dir_opt = keychain_dir_for(profile, &dir);
-        if let Ok(creds) = credentials::read_macos_keychain(dir_opt.as_deref()) {
-            return Ok(creds.access_token);
+        let keychain_dir = if profile.config_dir.is_empty() {
+            None
+        } else {
+            Some(dir.clone())
+        };
+        if let Ok(c) = credentials::read_macos_keychain(keychain_dir.as_deref()) {
+            return Ok((c, CredSource::Keychain(keychain_dir)));
         }
-        // fall through to file (Ubuntu credentials synced to macOS, manual files, etc.)
     }
 
     let creds = credentials::read(&dir).map_err(|_| {
@@ -141,48 +158,40 @@ async fn load_token(profile: &Profile) -> Result<String> {
             anyhow::anyhow!("cannot read {}", path.display())
         }
     })?;
-    Ok(creds.access_token)
+    Ok((creds, CredSource::File(dir)))
 }
 
-#[cfg(target_os = "macos")]
-fn keychain_dir_for(profile: &Profile, resolved: &std::path::Path) -> Option<std::path::PathBuf> {
-    if profile.config_dir.is_empty() {
-        None
-    } else {
-        Some(resolved.to_path_buf())
+fn persist_credentials(
+    source: &CredSource,
+    creds: &credentials::OauthCredentials,
+) -> Result<()> {
+    match source {
+        #[cfg(target_os = "macos")]
+        CredSource::Keychain(dir) => credentials::write_macos_keychain(dir.as_deref(), creds),
+        CredSource::File(dir) => credentials::write(dir, creds),
     }
 }
 
-async fn run_probe(
-    profile: &Profile,
-    token: String,
+async fn probe_with(
+    creds: credentials::OauthCredentials,
+    source: CredSource,
     prior: Option<&ProfileUpdate>,
 ) -> ProfileState {
-    match probe::run(&token).await {
+    match probe::run(&creds.access_token).await {
         Ok(result) => ProfileState::Ok(result),
-        Err(probe::ProbeError::NeedsRefresh) => attempt_refresh(profile).await,
+        Err(probe::ProbeError::NeedsRefresh) => attempt_refresh(creds, source).await,
         Err(probe::ProbeError::NotProMax) => ProfileState::NotProMax,
         Err(other) => stale_or_error(prior, other.to_string()),
     }
 }
 
-async fn attempt_refresh(profile: &Profile) -> ProfileState {
-    let dir = config::resolve_config_dir(profile);
-
-    // Read current credentials from wherever they live (Keychain on macOS,
-    // file on Linux — try Keychain first on macOS, fall back to file).
-    let current = match read_credentials(profile, &dir) {
-        Ok(c) => c,
-        Err(e) => {
-            return ProfileState::NeedsRelogin {
-                reason: format!("cannot read credentials: {e}"),
-            }
-        }
-    };
-
+async fn attempt_refresh(
+    current: credentials::OauthCredentials,
+    source: CredSource,
+) -> ProfileState {
     match oauth_refresh::refresh(&current).await {
         Ok(updated) => {
-            if let Err(e) = persist_credentials(profile, &dir, &updated) {
+            if let Err(e) = persist_credentials(&source, &updated) {
                 return ProfileState::Error {
                     message: format!("refreshed but failed to persist: {e}"),
                 };
@@ -199,39 +208,6 @@ async fn attempt_refresh(profile: &Profile) -> ProfileState {
             reason: e.to_string(),
         },
     }
-}
-
-fn read_credentials(
-    profile: &Profile,
-    dir: &std::path::Path,
-) -> Result<credentials::OauthCredentials> {
-    #[cfg(target_os = "macos")]
-    {
-        let dir_opt = keychain_dir_for(profile, dir);
-        if let Ok(c) = credentials::read_macos_keychain(dir_opt.as_deref()) {
-            return Ok(c);
-        }
-    }
-    let _ = profile; // unused on non-macos
-    credentials::read(dir)
-}
-
-fn persist_credentials(
-    profile: &Profile,
-    dir: &std::path::Path,
-    creds: &credentials::OauthCredentials,
-) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        // If we read from Keychain, write back there. Otherwise (file-based
-        // on macOS — rare, only if user synced from Ubuntu), update the file.
-        let dir_opt = keychain_dir_for(profile, dir);
-        if credentials::read_macos_keychain(dir_opt.as_deref()).is_ok() {
-            return credentials::write_macos_keychain(dir_opt.as_deref(), creds);
-        }
-    }
-    let _ = profile;
-    credentials::write(dir, creds)
 }
 
 fn stale_or_error(prior: Option<&ProfileUpdate>, message: String) -> ProfileState {

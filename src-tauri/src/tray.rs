@@ -5,9 +5,9 @@ use tauri::{
     AppHandle, Manager, WebviewWindow,
 };
 
-use crate::config;
 use crate::poller::{ProfileState, ProfileUpdate};
 use std::collections::HashSet;
+use std::sync::Mutex;
 
 pub const TRAY_ID: &str = "main";
 
@@ -42,29 +42,20 @@ pub fn build(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
-pub fn update_tray_title(app: &AppHandle, updates: &[ProfileUpdate]) {
-    // Honor per-profile `show_in_tray` toggle. If config can't be read, fall
-    // back to showing all profiles.
-    let visible: Option<HashSet<String>> = config::load().ok().map(|cfg| {
-        cfg.profiles
-            .iter()
-            .filter(|p| p.show_in_tray)
-            .map(|p| p.id.clone())
-            .collect()
-    });
-
+pub fn update_tray_title(
+    app: &AppHandle,
+    updates: &[ProfileUpdate],
+    visible_ids: &HashSet<String>,
+) {
     let parts: Vec<String> = updates
         .iter()
-        .filter(|u| visible.as_ref().map_or(true, |s| s.contains(&u.profile_id)))
+        .filter(|u| visible_ids.contains(&u.profile_id))
         .filter_map(|u| match &u.state {
             ProfileState::Ok(r) => Some((r.sess_pct, r.week_pct)),
             ProfileState::Stale { last, .. } => Some((last.sess_pct, last.week_pct)),
             _ => None,
         })
         .map(|(sess, week)| {
-            // Color reflects the worst of (5h, 7d) so a near-empty 5h with a
-            // hot 7d still signals attention. The displayed number is the 5h
-            // (the most immediate gauge).
             let worst = sess.max(week);
             let dot = if worst >= 0.85 {
                 "🔴"
@@ -82,6 +73,14 @@ pub fn update_tray_title(app: &AppHandle, updates: &[ProfileUpdate]) {
     } else {
         parts.join(" · ")
     };
+
+    static LAST: Mutex<String> = Mutex::new(String::new());
+    if let Ok(mut last) = LAST.lock() {
+        if *last == title {
+            return;
+        }
+        *last = title.clone();
+    }
 
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_title(Some(&title));
@@ -138,18 +137,16 @@ pub fn show_window(app: &AppHandle, label: &str) {
     }
 }
 
-fn position_popover(win: &WebviewWindow, click_x: Option<f64>, click_y: Option<f64>) {
-    // y = 28 logical pts places the popup just below macOS menu bar (22-24pt tall) on all densities.
+fn position_popover(win: &WebviewWindow, click_x: Option<f64>, _click_y: Option<f64>) {
+    // 28pt clears the macOS menu bar (22–24pt tall) at any display density.
     const Y_BELOW_BAR: f64 = 28.0;
     let scale = win.scale_factor().unwrap_or(2.0);
     if let Some(px) = click_x {
-        let _ = click_y; // y comes from menu-bar constant, not click
         let lx = px / scale;
         let x = (lx - 160.0).max(8.0);
         let _ = win.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y: Y_BELOW_BAR }));
         return;
     }
-    // Fallback: top-right area
     if let Ok(Some(monitor)) = win.primary_monitor() {
         let sz = monitor.size();
         let sc = monitor.scale_factor();

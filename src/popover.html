@@ -157,6 +157,7 @@
     </div>
 
     <script type="module">
+      import { colorClass, formatPct, formatReset, escapeHtml } from "./app.js";
       const tauri = window.__TAURI__;
       const { invoke } = tauri.core;
       const { listen } = tauri.event;
@@ -165,31 +166,7 @@
       const tsEl = document.getElementById("timestamp");
       const updatesById = new Map();
 
-      function pctColor(p) {
-        if (p >= 0.85) return "red";
-        if (p >= 0.6)  return "amber";
-        return "";
-      }
-
-      function fmt(p) { return Math.round((p || 0) * 100) + "%"; }
-
-      function fmtReset(iso) {
-        if (!iso) return "—";
-        const mins = Math.max(0, Math.floor((new Date(iso) - Date.now()) / 60000));
-        if (mins < 60)  return mins + "m";
-        const h = Math.floor(mins / 60), m = mins % 60;
-        if (h < 24) return h + "h " + m + "m";
-        return Math.floor(h / 24) + "d " + (h % 24) + "h";
-      }
-
-      function esc(s) {
-        return String(s || "")
-          .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-          .replace(/"/g,"&quot;");
-      }
-
       async function fitHeight() {
-        // Let the browser lay out the new content before measuring.
         await new Promise(r => requestAnimationFrame(r));
         const h = document.body.scrollHeight;
         await invoke("fit_window_height", { label: "popover", height: h }).catch(() => {});
@@ -222,7 +199,7 @@
           p5 = s.last.sess_pct; p7 = s.last.week_pct; r5 = s.last.sess_reset; r7 = s.last.week_reset; status = "stale";
         }
 
-        const name = esc(u.profile_name || u.email || "Account");
+        const name = escapeHtml(u.profile_name || u.email || "Account");
 
         div.innerHTML = `
           <div class="profile-header">
@@ -230,21 +207,21 @@
           </div>
           <div class="bar-row">
             <span class="bar-label">5h</span>
-            <div class="bar-track"><div class="bar-fill ${pctColor(p5)}" style="width:${Math.min(100, p5*100)}%"></div></div>
-            <span class="bar-pct ${pctColor(p5)}">${fmt(p5)}</span>
+            <div class="bar-track"><div class="bar-fill ${colorClass(p5)}" style="width:${Math.min(100, p5*100)}%"></div></div>
+            <span class="bar-pct ${colorClass(p5)}">${formatPct(p5)}</span>
           </div>
           <div class="bar-row">
             <span class="bar-label">7d</span>
-            <div class="bar-track"><div class="bar-fill ${pctColor(p7)}" style="width:${Math.min(100, p7*100)}%"></div></div>
-            <span class="bar-pct ${pctColor(p7)}">${fmt(p7)}</span>
+            <div class="bar-track"><div class="bar-fill ${colorClass(p7)}" style="width:${Math.min(100, p7*100)}%"></div></div>
+            <span class="bar-pct ${colorClass(p7)}">${formatPct(p7)}</span>
           </div>
-          ${status ? `<div class="profile-meta"><span>resets 5h in ${fmtReset(r5)} · 7d in ${fmtReset(r7)}</span><span>${esc(status)}</span></div>` : ""}
+          ${status ? `<div class="profile-meta"><span>resets 5h in ${formatReset(r5)} · 7d in ${formatReset(r7)}</span><span>${escapeHtml(status)}</span></div>` : ""}
         `;
 
         if (s.kind === "needs_relogin") {
           const note = document.createElement("div");
           note.className = "profile-meta";
-          note.textContent = "login required — use Settings → Login";
+          note.textContent = s.reason || "login required — run `claude /login`";
           div.appendChild(note);
         }
         return div;
@@ -272,9 +249,6 @@
       document.getElementById("refresh").addEventListener("click", () => invoke("refresh_now"));
       document.getElementById("settings").addEventListener("click", () => invoke("show_settings"));
       document.getElementById("quit").addEventListener("click", () => invoke("quit_app"));
-
-      // No auto-close on blur: closing via tray icon click (toggle) is enough.
-      // (Auto-close caused Settings window to kill the popover when it got focus.)
 
       init();
     </script>
