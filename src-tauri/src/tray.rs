@@ -18,13 +18,20 @@ pub fn build(app: &AppHandle) -> Result<()> {
 
     let menu = build_context_menu(app)?;
 
+    // On Linux the AppIndicator/KSNI protocol does not deliver per-click events
+    // to the consumer — left-click is always handled by the desktop. Opening the
+    // menu on left-click matches the platform convention (Slack/Telegram/Discord
+    // do the same on GNOME). On macOS we keep left-click free so it can toggle
+    // the popover directly via the `on_tray_icon_event` handler below.
+    let left_click_opens_menu = cfg!(target_os = "linux");
+
     let _tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
         .icon_as_template(false)
         .title("…")
         .tooltip("Clawd Tracker — Claude usage")
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        .show_menu_on_left_click(left_click_opens_menu)
         .on_menu_event(handle_context_event)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
@@ -88,12 +95,15 @@ pub fn update_tray_title(
 }
 
 fn build_context_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>> {
+    let show = MenuItem::with_id(app, "show_popover", "Show details", true, None::<&str>)?;
     let refresh = MenuItem::with_id(app, "refresh", "Refresh now", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
+            &show,
+            &PredefinedMenuItem::separator(app)?,
             &refresh,
             &settings,
             &PredefinedMenuItem::separator(app)?,
@@ -157,6 +167,13 @@ fn position_popover(win: &WebviewWindow, click_x: Option<f64>, _click_y: Option<
 
 fn handle_context_event(app: &AppHandle, event: MenuEvent) {
     match event.id.as_ref() {
+        "show_popover" => {
+            if let Some(win) = app.get_webview_window("popover") {
+                position_popover(&win, None, None);
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }
         "refresh" => {
             let store = app.state::<crate::poller::UsageStoreHandle>().inner().clone();
             let app_clone = app.clone();

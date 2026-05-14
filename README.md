@@ -113,11 +113,18 @@ Settings → that profile's hint, then click **Refresh** in the popover.
 
 ## Daily use
 
-- **Left-click tray icon** → popover with all enabled accounts (5h + 7d
-  bars, both colored by load, plus reset countdowns).
-- **Right-click tray icon** → Refresh / Settings / Quit.
-- The widget (toggleable from the popover header) is a draggable, always-on-top
-  pill if you want a permanent corner indicator.
+- **macOS** — left-click the tray icon to toggle the popover (5h + 7d bars,
+  both colored by load, plus reset countdowns). Right-click for Refresh /
+  Settings / Quit.
+- **Ubuntu / Linux** — left- *or* right-click opens the menu. Pick **Show
+  details** to open the popover. This is a platform limitation: the
+  AppIndicator/KSNI protocol Linux uses for tray icons does not deliver
+  per-click events to the app, so opening the menu is the only entry point
+  (same pattern as Slack / Discord / Telegram on GNOME).
+- The **floating widget** (toggleable from the popover header) is a
+  draggable, always-on-top pill that shows every account's load at a
+  glance — recommended on Linux if you want a permanent indicator without
+  going through the menu each time.
 
 ### What's in the menu bar
 
@@ -168,7 +175,7 @@ multi-platform release is a two-step ritual:
 
 ```bash
 # Step 1 — on macOS, create the release with the .dmg
-VERSION=0.1.1
+VERSION=0.1.2
 pnpm tauri build
 gh release create v$VERSION \
   --title "v$VERSION" \
