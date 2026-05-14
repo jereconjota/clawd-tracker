@@ -17,11 +17,11 @@ response headers.
 > your own risk; the project is released under the MIT license (see
 > `LICENSE`), with no warranty of fitness for any purpose.
 
-**Menu bar** shows one entry per enabled account, colored by load
-(🟢 < 60 %, 🟡 60–85 %, 🔴 ≥ 85 %). The number is the current **5h** percent:
+**Menu bar** shows one entry per enabled account as `<name> <5h%>`, joined by ` · `.
+Names longer than 10 characters are truncated with `…`:
 
 ```
-🟡 58% · 🟢 0%
+account-1 58% · account-2 0%
 ```
 
 Click the icon for the popover:
@@ -40,7 +40,7 @@ Click the icon for the popover:
 └──────────────────────────────────────┘
 ```
 
-The 5H / 7D numbers and bars share the same color scale as the menu-bar dot.
+The 5H / 7D numbers and bars are colored by load (green < 60 %, amber 60–85 %, red ≥ 85 %).
 
 ---
 
@@ -115,16 +115,14 @@ Settings → that profile's hint, then click **Refresh** in the popover.
 
 - **macOS** — left-click the tray icon to toggle the popover (5h + 7d bars,
   both colored by load, plus reset countdowns). Right-click for Refresh /
-  Settings / Quit.
+  Settings / Quit. The popover dismisses on **Escape** or when focus moves
+  to another window (standard popover UX).
 - **Ubuntu / Linux** — left- *or* right-click opens the menu. Pick **Show
   details** to open the popover. This is a platform limitation: the
   AppIndicator/KSNI protocol Linux uses for tray icons does not deliver
   per-click events to the app, so opening the menu is the only entry point
-  (same pattern as Slack / Discord / Telegram on GNOME).
-- The **floating widget** (toggleable from the popover header) is a
-  draggable, always-on-top pill that shows every account's load at a
-  glance — recommended on Linux if you want a permanent indicator without
-  going through the menu each time.
+  (same pattern as Slack / Discord / Telegram on GNOME). The popover also
+  dismisses on Escape and on focus loss.
 
 ### What's in the menu bar
 
@@ -175,7 +173,7 @@ multi-platform release is a two-step ritual:
 
 ```bash
 # Step 1 — on macOS, create the release with the .dmg
-VERSION=0.1.3
+VERSION=0.1.4
 pnpm tauri build
 gh release create v$VERSION \
   --title "v$VERSION" \
@@ -236,7 +234,6 @@ If you see five `anthropic-ratelimit-unified-*` headers, the probe works.
 ```
 src/                      → frontend (vanilla JS + HTML, no framework)
   popover.html              tray pop-up
-  widget.html               draggable always-on-top pill
   settings.html             config window
   app.js                    shared rendering helpers
   styles.css
@@ -251,7 +248,7 @@ src-tauri/
     credentials.rs          per-profile Keychain access (macOS, sha256-suffixed
                             service name) + .credentials.json read/write (0600)
     config.rs               app config (~/.config/clawd-tracker/)
-    tray.rs                 menu-bar icon, semaphore-colored title,
+    tray.rs                 menu-bar icon, "<name> <5h%>" title,
                             per-profile filtering via show_in_tray
   tauri.conf.json
   Cargo.toml
@@ -275,4 +272,4 @@ same store.
 | `not Pro/Max` on a clearly Max account             | The OAuth scope grant didn't include `user:inference`. Re-run `claude /login`.   |
 | Auto-detect missed a macOS account                 | Make sure you've logged into it via the CLI at least once with the matching `CLAUDE_CONFIG_DIR` — the app keys off the Keychain entry created by that login. |
 | Menu bar shows fewer entries than expected         | Open Settings and check the **show in menu bar** box for the missing profile. |
-| Want a single global indicator instead of per-account dots | Disable **show in menu bar** for every account except one. |
+| Menu bar string is too long with many accounts     | Use shorter names (≤10 chars), or uncheck **show in menu bar** for the accounts you don't need at a glance. |

@@ -235,26 +235,6 @@ button:hover {
   color: var(--fg-dim);
 }
 
-/* Widget compact mode */
-body.widget .shell {
-  padding: 10px 12px;
-  gap: 8px;
-}
-
-body.widget .profile {
-  padding: 8px;
-}
-
-body.widget .profile h3 {
-  font-size: 11px;
-  margin-bottom: 6px;
-}
-
-body.widget .bar-row {
-  font-size: 10px;
-  grid-template-columns: 40px 1fr 36px;
-}
-
 /* Settings */
 html:has(body.settings) {
   overflow-y: auto;

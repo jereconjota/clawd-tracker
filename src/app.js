@@ -1,4 +1,4 @@
-// Shared helpers for popover & widget. Uses window.__TAURI__ (withGlobalTauri).
+// Shared helpers for popover. Uses window.__TAURI__ (withGlobalTauri).
 
 const tauri = window.__TAURI__ || {};
 const { invoke } = tauri.core || tauri.tauri || {};
@@ -12,10 +12,6 @@ export async function refreshNow() {
   await invoke("refresh_now");
 }
 
-export async function toggleWidget() {
-  await invoke("toggle_widget");
-}
-
 export async function showSettings() {
   await invoke("show_settings");
 }
@@ -26,10 +22,6 @@ export async function saveConfig(cfg) {
 
 export async function autoDetect() {
   return await invoke("auto_detect");
-}
-
-export async function persistWidgetPos(x, y) {
-  await invoke("persist_widget_pos", { x, y });
 }
 
 export function onUsageUpdated(cb) {

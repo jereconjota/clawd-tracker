@@ -57,21 +57,14 @@ pub fn update_tray_title(
     let parts: Vec<String> = updates
         .iter()
         .filter(|u| visible_ids.contains(&u.profile_id))
-        .filter_map(|u| match &u.state {
-            ProfileState::Ok(r) => Some((r.sess_pct, r.week_pct)),
-            ProfileState::Stale { last, .. } => Some((last.sess_pct, last.week_pct)),
-            _ => None,
-        })
-        .map(|(sess, week)| {
-            let worst = sess.max(week);
-            let dot = if worst >= 0.85 {
-                "🔴"
-            } else if worst >= 0.60 {
-                "🟡"
-            } else {
-                "🟢"
+        .filter_map(|u| {
+            let pct = match &u.state {
+                ProfileState::Ok(r) => r.sess_pct,
+                ProfileState::Stale { last, .. } => last.sess_pct,
+                _ => return None,
             };
-            format!("{dot} {}%", (sess * 100.0).round() as i32)
+            let name = truncate_name(&u.profile_name);
+            Some(format!("{name} {}%", (pct * 100.0).round() as i32))
         })
         .collect();
 
@@ -125,19 +118,17 @@ pub fn toggle_popover_at(app: &AppHandle, click_x: f64, click_y: f64) {
     }
 }
 
-pub fn toggle_widget(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("widget") {
-        let visible = win.is_visible().unwrap_or(false);
-        if visible {
-            let _ = win.hide();
-        } else {
-            let _ = win.show();
-        }
-        if let Ok(mut cfg) = crate::config::load() {
-            cfg.widget_visible = !visible;
-            let _ = crate::config::save(&cfg);
-        }
+fn truncate_name(name: &str) -> String {
+    // Char-aware truncation: 10 chars max, ellipsis appended.
+    // Avoids slicing through multibyte UTF-8 sequences.
+    const MAX: usize = 10;
+    let chars: Vec<char> = name.chars().collect();
+    if chars.len() <= MAX {
+        return name.to_string();
     }
+    let mut out: String = chars.into_iter().take(MAX).collect();
+    out.push('…');
+    out
 }
 
 pub fn show_window(app: &AppHandle, label: &str) {

@@ -16,21 +16,11 @@ pub struct Profile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WindowPos {
-    pub x: i32,
-    pub y: i32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub profiles: Vec<Profile>,
     #[serde(default = "default_interval")]
     pub poll_interval_s: u64,
-    #[serde(default)]
-    pub widget_visible: bool,
-    #[serde(default)]
-    pub widget_pos: Option<WindowPos>,
     #[serde(default = "default_true")]
     pub autostart: bool,
 }
@@ -48,8 +38,6 @@ impl Default for Config {
         Self {
             profiles: vec![],
             poll_interval_s: default_interval(),
-            widget_visible: false,
-            widget_pos: None,
             autostart: true,
         }
     }

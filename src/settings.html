@@ -50,15 +50,11 @@
       let profiles = [];
       let pollInterval = 60;
       let autostart = true;
-      let widgetVisible = false;
-      let widgetPos = null;
 
       async function doSave() {
         await saveConfig({
           profiles,
           poll_interval_s: Math.max(10, parseInt(intervalEl.value || "60", 10)),
-          widget_visible: widgetVisible,
-          widget_pos: widgetPos,
           autostart: autostartEl.checked,
         });
       }
@@ -116,8 +112,6 @@
           profiles = snap.config.profiles || [];
           pollInterval = snap.config.poll_interval_s || 60;
           autostart = snap.config.autostart ?? true;
-          widgetVisible = snap.config.widget_visible ?? false;
-          widgetPos = snap.config.widget_pos ?? null;
         }
         intervalEl.value = pollInterval;
         autostartEl.checked = autostart;

@@ -59,20 +59,8 @@ async fn auto_detect() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn toggle_widget(app: AppHandle) {
-    tray::toggle_widget(&app);
-}
-
-#[tauri::command]
 async fn show_settings(app: AppHandle) {
     tray::show_window(&app, "settings");
-}
-
-#[tauri::command]
-async fn persist_widget_pos(x: i32, y: i32) -> Result<(), String> {
-    let mut cfg = config::load().map_err(|e| e.to_string())?;
-    cfg.widget_pos = Some(config::WindowPos { x, y });
-    config::save(&cfg).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -103,9 +91,7 @@ pub fn run() {
             refresh_now,
             save_config,
             auto_detect,
-            toggle_widget,
             show_settings,
-            persist_widget_pos,
             quit_app,
             fit_window_height,
         ])
@@ -117,7 +103,6 @@ pub fn run() {
                 eprintln!("tray init failed: {e:#}");
             }
 
-            apply_initial_window_state(&app.handle());
             poller::spawn(app.handle().clone(), store);
 
             #[cfg(target_os = "macos")]
@@ -127,20 +112,4 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error running tauri app");
-}
-
-fn apply_initial_window_state(app: &AppHandle) {
-    let cfg = match config::load() {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    if let Some(widget) = app.get_webview_window("widget") {
-        if let Some(pos) = &cfg.widget_pos {
-            let _ = widget.set_position(tauri::PhysicalPosition { x: pos.x, y: pos.y });
-        }
-        if cfg.widget_visible {
-            let _ = widget.show();
-        }
-    }
 }
