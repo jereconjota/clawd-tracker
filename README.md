@@ -17,12 +17,17 @@ response headers.
 > your own risk; the project is released under the MIT license (see
 > `LICENSE`), with no warranty of fitness for any purpose.
 
-**Menu bar** shows one entry per enabled account as `<name> <5h%>`, joined by ` · `.
-Names longer than 10 characters are truncated with `…`:
+**Menu bar** shows one entry per enabled account as `<label> <5h%>`, joined
+by ` · `. By default `label` is the profile name truncated to 5 characters
+with `…`; each profile can override this via Settings → **Menubar label**
+(up to 12 chars, used verbatim with no truncation):
 
 ```
-account-1 58% · account-2 0%
+J 58% · Per 0%
 ```
+
+When every profile has **show in menu bar** off, the tray title is empty
+and only the icon is visible.
 
 Click the icon for the popover:
 
@@ -173,7 +178,7 @@ multi-platform release is a two-step ritual:
 
 ```bash
 # Step 1 — on macOS, create the release with the .dmg
-VERSION=0.1.4
+VERSION=0.1.5
 pnpm tauri build
 gh release create v$VERSION \
   --title "v$VERSION" \

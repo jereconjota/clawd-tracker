@@ -25,6 +25,7 @@ pub enum ProfileState {
 pub struct ProfileUpdate {
     pub profile_id: String,
     pub profile_name: String,
+    pub tray_label: Option<String>,
     pub email: Option<String>,
     pub state: ProfileState,
     pub updated_at: DateTime<Utc>,
@@ -109,6 +110,7 @@ async fn poll_one(profile: &Profile, prior: Option<ProfileUpdate>) -> ProfileUpd
     ProfileUpdate {
         profile_id: profile.id.clone(),
         profile_name: profile.name.clone(),
+        tray_label: profile.tray_label.clone(),
         email,
         state,
         updated_at: now,

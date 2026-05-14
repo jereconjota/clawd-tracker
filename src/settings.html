@@ -80,6 +80,10 @@
             <label><input type="checkbox" data-field="show_in_tray" ${p.show_in_tray !== false ? "checked" : ""}/> show in menu bar</label>
             <span data-field="id" style="margin-left:auto;">id: ${escapeHtml(p.id)}</span>
           </div>
+          <div style="display:flex; gap:8px; margin-top:8px; font-size:11px; color: var(--fg-dim); align-items:center;">
+            <label style="white-space:nowrap;">Menubar label</label>
+            <input type="text" data-field="tray_label" placeholder="e.g. J or Per (defaults to truncated name)" maxlength="12" value="${escapeHtml(p.tray_label || "")}" style="flex:1;" />
+          </div>
         `;
         div.appendChild(hint);
 
@@ -89,6 +93,10 @@
             if (f === "id") return;
             if (el.type === "checkbox") {
               profiles[idx][f] = el.checked;
+            } else if (f === "tray_label") {
+              // Empty input → null, so serde treats it as "no override" and
+              // the field is skipped when serializing.
+              profiles[idx][f] = el.value === "" ? null : el.value;
             } else {
               profiles[idx][f] = el.value;
             }
@@ -130,6 +138,7 @@
           enabled: true,
           show_in_tray: true,
           use_macos_keychain: false,
+          tray_label: null,
         });
         render();
       });
@@ -150,6 +159,7 @@
             enabled: true,
             show_in_tray: true,
             use_macos_keychain: false,
+            tray_label: null,
           });
           added++;
         }

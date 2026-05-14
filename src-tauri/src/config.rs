@@ -13,6 +13,8 @@ pub struct Profile {
     pub show_in_tray: bool,
     #[serde(default)]
     pub use_macos_keychain: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tray_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +115,7 @@ pub fn seed_default() -> Config {
                 enabled: true,
                 show_in_tray: true,
                 use_macos_keychain: true,
+                tray_label: None,
             });
         }
     }
@@ -138,6 +141,7 @@ fn profile_for_dir(dir: &std::path::Path) -> Profile {
         enabled: true,
         show_in_tray: true,
         use_macos_keychain: false,
+        tray_label: None,
     }
 }
 

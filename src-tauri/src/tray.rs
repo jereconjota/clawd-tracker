@@ -63,13 +63,16 @@ pub fn update_tray_title(
                 ProfileState::Stale { last, .. } => last.sess_pct,
                 _ => return None,
             };
-            let name = truncate_name(&u.profile_name);
-            Some(format!("{name} {}%", (pct * 100.0).round() as i32))
+            let label = match u.tray_label.as_deref() {
+                Some(custom) if !custom.is_empty() => custom.to_string(),
+                _ => truncate_name(&u.profile_name),
+            };
+            Some(format!("{label} {}%", (pct * 100.0).round() as i32))
         })
         .collect();
 
     let title = if parts.is_empty() {
-        "—".to_string()
+        String::new()
     } else {
         parts.join(" · ")
     };
@@ -119,9 +122,10 @@ pub fn toggle_popover_at(app: &AppHandle, click_x: f64, click_y: f64) {
 }
 
 fn truncate_name(name: &str) -> String {
-    // Char-aware truncation: 10 chars max, ellipsis appended.
-    // Avoids slicing through multibyte UTF-8 sequences.
-    const MAX: usize = 10;
+    // Char-aware truncation: 5 chars max, ellipsis appended.
+    // Avoids slicing through multibyte UTF-8 sequences. Profiles can opt out
+    // of truncation entirely by setting a custom `tray_label`.
+    const MAX: usize = 5;
     let chars: Vec<char> = name.chars().collect();
     if chars.len() <= MAX {
         return name.to_string();
