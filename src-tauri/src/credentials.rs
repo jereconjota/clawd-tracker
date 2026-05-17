@@ -93,38 +93,48 @@ fn sha256_hex_prefix(bytes: &[u8], n_chars: usize) -> String {
     full.chars().take(n_chars).collect()
 }
 
-// Keychain access goes through Apple's Security framework C API rather than
-// shelling out to /usr/bin/security, so the credential payload never appears
-// in the argv of a child process (which is world-readable via `ps`).
 #[cfg(target_os = "macos")]
 pub fn read_macos_keychain(config_dir: Option<&Path>) -> Result<OauthCredentials> {
+    use std::process::Command;
     let service = keychain_service(config_dir);
-    let bytes = security_framework::passwords::get_generic_password(&service, &keychain_account())
-        .map_err(|_| anyhow!("Keychain entry '{service}' not found"))?;
-    let raw = std::str::from_utf8(&bytes).context("Keychain payload not UTF-8")?;
-    let parsed: CredentialsFile = serde_json::from_str(raw)
+    let output = Command::new("security")
+        .args(["find-generic-password", "-s", &service, "-w"])
+        .output()
+        .context("invoking `security` to read Keychain")?;
+    if !output.status.success() {
+        return Err(anyhow!("Keychain entry '{service}' not found"));
+    }
+    let raw = String::from_utf8(output.stdout)?.trim().to_string();
+    let parsed: CredentialsFile = serde_json::from_str(&raw)
         .context("parsing Keychain payload as Claude credentials JSON")?;
     Ok(parsed.claude_ai_oauth)
 }
 
 #[cfg(target_os = "macos")]
 pub fn write_macos_keychain(config_dir: Option<&Path>, creds: &OauthCredentials) -> Result<()> {
+    use std::process::Command;
     let service = keychain_service(config_dir);
+    let user = std::env::var("USER").unwrap_or_else(|_| "claude".to_string());
     let payload = serde_json::to_string(&CredentialsFile {
         claude_ai_oauth: creds.clone(),
     })?;
-    security_framework::passwords::set_generic_password(
-        &service,
-        &keychain_account(),
-        payload.as_bytes(),
-    )
-    .map_err(|e| anyhow!("failed to update Keychain entry '{service}': {e}"))?;
+    let status = Command::new("security")
+        .args([
+            "add-generic-password",
+            "-U", // update if exists
+            "-s",
+            &service,
+            "-a",
+            &user,
+            "-w",
+            &payload,
+        ])
+        .status()
+        .context("invoking `security` to write Keychain")?;
+    if !status.success() {
+        return Err(anyhow!("failed to update Keychain entry '{service}'"));
+    }
     Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_account() -> String {
-    std::env::var("USER").unwrap_or_else(|_| "claude".to_string())
 }
 
 /// List config directories that have a corresponding Keychain entry on macOS,
