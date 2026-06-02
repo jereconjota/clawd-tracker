@@ -214,13 +214,79 @@ async fn attempt_refresh(
 
 fn stale_or_error(prior: Option<&ProfileUpdate>, message: String) -> ProfileState {
     if let Some(p) = prior {
-        if let ProfileState::Ok(result) = &p.state {
-            return ProfileState::Stale {
-                last: result.clone(),
-                message,
-            };
+        // Carry the last known reading forward whether the prior poll was a
+        // fresh `Ok` or already `Stale`. Without the `Stale` arm a transient
+        // error would escalate Ok -> Stale -> Error, dropping the account from
+        // the tray on the second failed poll.
+        let last = match &p.state {
+            ProfileState::Ok(result) => Some(result.clone()),
+            ProfileState::Stale { last, .. } => Some(last.clone()),
+            _ => None,
+        };
+        if let Some(last) = last {
+            return ProfileState::Stale { last, message };
         }
     }
     ProfileState::Error { message }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn probe_result(sess_pct: f32) -> ProbeResult {
+        ProbeResult {
+            sess_pct,
+            sess_reset: None,
+            week_pct: 0.0,
+            week_reset: None,
+            status: "allowed".into(),
+            opus_pct: None,
+            opus_reset: None,
+        }
+    }
+
+    fn update(state: ProfileState) -> ProfileUpdate {
+        ProfileUpdate {
+            profile_id: "p".into(),
+            profile_name: "p".into(),
+            tray_label: None,
+            email: None,
+            state,
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn ok_prior_becomes_stale() {
+        let prior = update(ProfileState::Ok(probe_result(1.0)));
+        match stale_or_error(Some(&prior), "boom".into()) {
+            ProfileState::Stale { last, .. } => assert_eq!(last.sess_pct, 1.0),
+            other => panic!("expected Stale, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stale_prior_stays_stale_not_error() {
+        // The regression: a second failed poll used to escalate Stale -> Error,
+        // which dropped the account from the tray. It must stay Stale and keep
+        // the last reading.
+        let prior = update(ProfileState::Stale {
+            last: probe_result(1.0),
+            message: "first failure".into(),
+        });
+        match stale_or_error(Some(&prior), "second failure".into()) {
+            ProfileState::Stale { last, .. } => assert_eq!(last.sess_pct, 1.0),
+            other => panic!("expected Stale, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_prior_is_error() {
+        assert!(matches!(
+            stale_or_error(None, "boom".into()),
+            ProfileState::Error { .. }
+        ));
+    }
 }
 
